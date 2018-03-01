@@ -6,79 +6,282 @@ my $mysql = Mojo::mysql->new('mysql://USERNAME:PASSWORD@localhost/CAPSTONE');
 
 get '/' => 'index';
 get '/index.html' => 'index';
+get '/login' => 'index';
 get '/register' => 'register';
 post '/register' => sub {
-  my ($mojo) = @_;
-  my $lastname = $mojo->param("lastname");
-  my $firstname = $mojo->param("firstname");
-  my $email = $mojo->param("email");
-  my $username = $mojo->param("username");
-  my $password = $mojo->param("password");
+  my $c = shift;
+  my $lastname = $c->req->body_params->param('lastname');
+  my $firstname = $c->req->body_params->param('firstname');
+  my $email = $c->req->body_params->param('email');
+  my $username = $c->req->body_params->param('username');
+  my $password = $c->req->body_params->param('password');
 
   my $db = $mysql->db;
-  $db->query('insert into users (LastName) values (?)', "$lastname");
-  $db->query('insert into users (FirstName) values (?)', "$firstname");
-  $db->query('insert into users (Email) values (?)', "$email");
-  $db->query('insert into users (UserName) values (?)', "$username");
-  $db->query('insert into users (Password) values (?)', "$password");
+  $db->query('INSERT INTO users (LastName, FirstName, Email, UserName, Password) VALUES (?, ?, ?, ?, ?)', $lastname, $firstname, $email, $username, $password);
 };
 
 
 app->start;
 __DATA__
 @@ index.html.ep
-<HTML>
-<HEAD><TITLE>Cybersecurity Capstone Project - Login</TITLE>
-</HEAD>
-<BODY bgcolor="000000" text="ffffff"><p><b>Cybersecurity Capstone Project - Login</b><hr><p>
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Cybersecurity Capstone Project - Login</title>
+<style>
+@import url(https://fonts.googleapis.com/css?family=Roboto:300);
 
-<center>
-<table cellpadding=1 cellspacing=0 border="0">
-<form method=post action="login" target=_top>
-<tr><td colspan=2><center><b></center></b></td></tr>
-<tr><td align=right><b>Username </b></td><td align=left> <input size=14 maxlength=100 type=text name="username" value=""></td></tr>
-<tr><td align=right><b>Password </b></td><td align=left> <input size=14 maxlength=100 type=text name="password" value=""></td></tr>
-<input type=hidden name="a" value="login">
-<tr><td colspan=2 align=center><input type=submit VALUE="Enter Message System"></td></tr>
-</form></table></center><p></body>
-<center><a href="register">Register your account</a> | <a href="https://github.com/sbagmeijer/cybersecurity-capstone-project">Download Source Code</a></center>
-</HTML>
+.login-page {
+  width: 360px;
+  padding: 8% 0 0;
+  margin: auto;
+}
+.form {
+  position: relative;
+  z-index: 1;
+  background: #FFFFFF;
+  max-width: 360px;
+  margin: 0 auto 100px;
+  padding: 45px;
+  text-align: center;
+  box-shadow: 0 0 20px 0 rgba(0, 0, 0, 0.2), 0 5px 5px 0 rgba(0, 0, 0, 0.24);
+}
+.form input {
+  font-family: "Roboto", sans-serif;
+  outline: 0;
+  background: #f2f2f2;
+  width: 100%;
+  border: 0;
+  margin: 0 0 15px;
+  padding: 15px;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+.form button {
+  font-family: "Roboto", sans-serif;
+  text-transform: uppercase;
+  outline: 0;
+  background: #4CAF50;
+  width: 100%;
+  border: 0;
+  padding: 15px;
+  color: #FFFFFF;
+  font-size: 14px;
+  -webkit-transition: all 0.3 ease;
+  transition: all 0.3 ease;
+  cursor: pointer;
+}
+.form button:hover,.form button:active,.form button:focus {
+  background: #43A047;
+}
+.form .message {
+  margin: 15px 0 0;
+  color: #b3b3b3;
+  font-size: 12px;
+}
+.form .message a {
+  color: #4CAF50;
+  text-decoration: none;
+}
+.form .register-form {
+  display: none;
+}
+.container {
+  position: relative;
+  z-index: 1;
+  max-width: 300px;
+  margin: 0 auto;
+}
+.container:before, .container:after {
+  content: "";
+  display: block;
+  clear: both;
+}
+.container .info {
+  margin: 50px auto;
+  text-align: center;
+}
+.container .info h1 {
+  margin: 0 0 15px;
+  padding: 0;
+  font-size: 36px;
+  font-weight: 300;
+  color: #1a1a1a;
+}
+.container .info span {
+  color: #4d4d4d;
+  font-size: 12px;
+}
+.container .info span a {
+  color: #000000;
+  text-decoration: none;
+}
+.container .info span .fa {
+  color: #EF3B3A;
+}
+body {
+  background: #76b852; /* fallback for old browsers */
+  background: -webkit-linear-gradient(right, #76b852, #8DC26F);
+  background: -moz-linear-gradient(right, #76b852, #8DC26F);
+  background: -o-linear-gradient(right, #76b852, #8DC26F);
+  background: linear-gradient(to left, #76b852, #8DC26F);
+  font-family: "Roboto", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;      
+}
+</style>
+<script>
+$('.message a').click(function(){
+   $('form').animate({height: "toggle", opacity: "toggle"}, "slow");
+});
+</script>
+</head>
+
+<body>
+<div class="login-page" action="/login" method="post">
+  <div class="form">
+    <form class="login-form">
+      <input type="text" placeholder="Username"/>
+      <input type="password" placeholder="Password"/>
+      <button>login</button>
+      <p class="message">Not registered? <a href="register">Create an account</a></p>
+    </form>
+  </div>
+</div>
+</body>
+
+</html>
 
 @@ register.html.ep
-<HEAD><title>Cybersecurity Capstone Project - Registration</TITLE>
-<BODY BGCOLOR="000000" TEXT="FFFFFF" onLoad="window.status='Cybersecurity Capstone Project - Registration'">
-<b><center>Cybersecurity Capstone Project - Registration</center>
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Cybersecurity Capstone Project - Login</title>
+<style>
+@import url(https://fonts.googleapis.com/css?family=Roboto:300);
 
-<FORM METHOD="POST" name="m" ACTION="register">
+.login-page {
+  width: 360px;
+  padding: 8% 0 0;
+  margin: auto;
+}
+.form {
+  position: relative;
+  z-index: 1;
+  background: #FFFFFF;
+  max-width: 360px;
+  margin: 0 auto 100px;
+  padding: 45px;
+  text-align: center;
+  box-shadow: 0 0 20px 0 rgba(0, 0, 0, 0.2), 0 5px 5px 0 rgba(0, 0, 0, 0.24);
+}
+.form input {
+  font-family: "Roboto", sans-serif;
+  outline: 0;
+  background: #f2f2f2;
+  width: 100%;
+  border: 0;
+  margin: 0 0 15px;
+  padding: 15px;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+.form button {
+  font-family: "Roboto", sans-serif;
+  text-transform: uppercase;
+  outline: 0;
+  background: #4CAF50;
+  width: 100%;
+  border: 0;
+  padding: 15px;
+  color: #FFFFFF;
+  font-size: 14px;
+  -webkit-transition: all 0.3 ease;
+  transition: all 0.3 ease;
+  cursor: pointer;
+}
+.form button:hover,.form button:active,.form button:focus {
+  background: #43A047;
+}
+.form .message {
+  margin: 15px 0 0;
+  color: #b3b3b3;
+  font-size: 12px;
+}
+.form .message a {
+  color: #4CAF50;
+  text-decoration: none;
+}
+.form .register-form {
+  display: none;
+}
+.container {
+  position: relative;
+  z-index: 1;
+  max-width: 300px;
+  margin: 0 auto;
+}
+.container:before, .container:after {
+  content: "";
+  display: block;
+  clear: both;
+}
+.container .info {
+  margin: 50px auto;
+  text-align: center;
+}
+.container .info h1 {
+  margin: 0 0 15px;
+  padding: 0;
+  font-size: 36px;
+  font-weight: 300;
+  color: #1a1a1a;
+}
+.container .info span {
+  color: #4d4d4d;
+  font-size: 12px;
+}
+.container .info span a {
+  color: #000000;
+  text-decoration: none;
+}
+.container .info span .fa {
+  color: #EF3B3A;
+}
+body {
+  background: #76b852; /* fallback for old browsers */
+  background: -webkit-linear-gradient(right, #76b852, #8DC26F);
+  background: -moz-linear-gradient(right, #76b852, #8DC26F);
+  background: -o-linear-gradient(right, #76b852, #8DC26F);
+  background: linear-gradient(to left, #76b852, #8DC26F);
+  font-family: "Roboto", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;      
+}
+</style>
+<script>
+$('.message a').click(function(){
+   $('form').animate({height: "toggle", opacity: "toggle"}, "slow");
+});
+</script>
+</head>
 
-<center><table width=500><tr><td><b><font size=-1>
+<body>
+<div class="login-page">
+  <div class="form">
+    <form class="login-form" action="/register" method="post">
+	  <input type="text" name="username" placeholder="Username"/>
+      <input type="password" name="password" placeholder="Password"/>
+      <input type="text" name="firstname" placeholder="First Name"/>
+	  <input type="text" name="lastname" placeholder="Last Name"/>
+	  <input type="text" name="email" placeholder="Email"/>
+      <button>register</button>
+      <p class="message">Already registered? <a href="login">Sign In</a></p>
+    </form>
+  </div>
+</div>
+</body>
 
-Choose a username:<br>
-
-<INPUT type="text" name="username" maxlength=21 value=""><p>
-
-Choose a password.(please use a sentence):<br>
-
-<INPUT type="password" name="password" maxlength=100 value=""><p>
-
-Input the Same Password again (verification):<br>
-
-<INPUT type="password" name="passwordverify" maxlength=100 value=""><p>
-
-Input your E-mail Address:<br>
-
-<INPUT type="text" name="email" maxlength=700 value=""><p>
-
-Fill in your First Name:<br>
-
-<INPUT type="text" name="firstname" maxlength=50 value=""><p>
-
-Fill in your Surname:<br>
-
-<INPUT type="text" name="lastname" maxlength=50 value=""><p>
-
-<center><INPUT TYPE=SUBMIT Value=" SUBMIT FORM "></center>
-</table></center>
-<br>
-<center><a href="index.html">Already registered? Login here.</a></center>
-</body></html>
+</html>
