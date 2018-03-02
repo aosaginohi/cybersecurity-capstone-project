@@ -8,6 +8,8 @@ CREATE TABLE users (
 	Email varchar(255) NOT NULL UNIQUE,
 	UserName varchar(255) NOT NULL UNIQUE,
 	Password varchar(255) NOT NULL,
+	EmailVerification varchar(10) NOT NULL,
+	PasswordVerification varchar(10),
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 

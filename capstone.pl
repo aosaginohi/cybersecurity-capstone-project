@@ -1,6 +1,20 @@
 #!/usr/bin/env perl
 use Mojolicious::Lite;
 use Mojo::mysql;
+use Mojolicious::Plugin::DefaultHelpers;
+use String::Random qw(random_regex random_string);
+use strict;
+use warnings;
+use Crypt::CBC;
+use Email::Valid;
+
+my $myerror;
+my $key = 'YOU SECRET KET!';
+my $cipher = Crypt::CBC->new(
+    -key       => $key,
+    -keylength => '256',
+    -cipher    => "Crypt::OpenSSL::AES"
+);
 
 my $mysql = Mojo::mysql->new('mysql://USERNAME:PASSWORD@localhost/CAPSTONE');
 
@@ -10,15 +24,66 @@ get '/login' => 'index';
 get '/register' => 'register';
 post '/register' => sub {
   my $c = shift;
-  my $lastname = $c->req->body_params->param('lastname');
-  my $firstname = $c->req->body_params->param('firstname');
-  my $email = $c->req->body_params->param('email');
-  my $username = $c->req->body_params->param('username');
-  my $password = $c->req->body_params->param('password');
+  
+  my $VerifyInputLastname = $c->req->body_params->param('lastname');
+  my $VerifyInputFirstname = $c->req->body_params->param('firstname');
+  my $VerifyInputEmail = $c->req->body_params->param('email');
+  my $VerifyInputUsername = $c->req->body_params->param('username');
+  my $VerifyInputPassword = $c->req->body_params->param('password');
+  my $VerifyInputPasswordverify = $c->req->body_params->param('passwordverify');
+    
+  if ($VerifyInputLastname eq "" | $VerifyInputFirstname eq "" | $VerifyInputEmail eq "" | $VerifyInputUsername eq "" | $VerifyInputPassword eq "" | $VerifyInputPasswordverify eq "") 
+  {
+    my $myerror = 'Please fill in all fields.';
+    $c->stash( 
+                 myerror => $myerror, 
+                ); 
+                                 
+    return $c->render(template => 'register');
+  }
+
+  if ($VerifyInputLastname !~ /^[a-zA-Z]+$/ | $VerifyInputFirstname !~ /^[a-zA-Z]+$/ | $VerifyInputUsername !~ /^[a-zA-Z]+$/){
+    my $myerror = 'You can use only alphanumeric characters for "username"';
+    $c->stash( 
+                 myerror => $myerror, 
+                ); 
+                                 
+    return $c->render(template => 'register');
+  }
+  
+  if (Email::Valid->address($VerifyInputEmail)) {
+  # meh no idea how to only check wrong.
+  } else {
+    my $myerror = 'You did not input a valid email';
+    $c->stash( 
+                 myerror => $myerror, 
+                ); 
+                                 
+    return $c->render(template => 'register'); 
+  }
+  
+  if ($VerifyInputPassword ne $VerifyInputPasswordverify | $VerifyInputPasswordverify ne $VerifyInputPassword){
+    my $myerror = 'passwords did not match';
+    $c->stash( 
+                 myerror => $myerror, 
+                ); 
+                                 
+    return $c->render(template => 'register'); 
+  }
+  
+  my $lastname = $cipher->encrypt_hex($c->req->body_params->param('lastname'));
+  my $firstname = $cipher->encrypt_hex($c->req->body_params->param('firstname'));
+  my $email = $cipher->encrypt_hex($c->req->body_params->param('email'));
+  my $username = $cipher->encrypt_hex($c->req->body_params->param('username'));
+  my $password = $cipher->encrypt_hex($c->req->body_params->param('password'));
+  my $emailverification = random_string("..........");
 
   my $db = $mysql->db;
-  $db->query('INSERT INTO users (LastName, FirstName, Email, UserName, Password) VALUES (?, ?, ?, ?, ?)', $lastname, $firstname, $email, $username, $password);
-};
+  $db->query('INSERT INTO users (LastName, FirstName, Email, UserName, Password, EmailVerification) VALUES (?, ?, ?, ?, ?, ?)', $lastname, $firstname, $email, $username, $password, $emailverification);
+  
+  $c->render(template => 'index');
+  };
+  
 
 
 app->start;
@@ -158,7 +223,7 @@ $('.message a').click(function(){
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Cybersecurity Capstone Project - Login</title>
+<title>Cybersecurity Capstone Project - Register</title>
 <style>
 @import url(https://fonts.googleapis.com/css?family=Roboto:300);
 
@@ -270,10 +335,12 @@ $('.message a').click(function(){
 
 <body>
 <div class="login-page">
+<center><font size="6"><p style="color:red"><b><%= stash "myerror" %></b><p><font></center>
   <div class="form">
     <form class="login-form" action="/register" method="post">
 	  <input type="text" name="username" placeholder="Username"/>
       <input type="password" name="password" placeholder="Password"/>
+	  <input type="password" name="passwordverify" placeholder="Type your password again"/>
       <input type="text" name="firstname" placeholder="First Name"/>
 	  <input type="text" name="lastname" placeholder="Last Name"/>
 	  <input type="text" name="email" placeholder="Email"/>
