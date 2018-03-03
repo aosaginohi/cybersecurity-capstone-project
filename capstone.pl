@@ -29,7 +29,7 @@ my $smtppassword = '';
 my $myerror;
 
 ### Initialize how we want to encrypt, we use AES with a 256bit key, you must specify a key yourself.
-my $key = 'YOUR SECRET HERE!';
+my $key = 'YOUR SECRET HERE';
 my $cipher = Crypt::CBC->new(
     -key       => $key,
     -keylength => '256',
@@ -48,6 +48,78 @@ get '/'  => sub {
   $c->redirect_to('member') unless ($c->session('authenticated') != 1);
 } => 'index';
 get '/member' => sub {
+  ### Initialize c variable.
+  my $c = shift;
+  
+  ### if the user is not authenticated then go to login.
+  $c->redirect_to('login') unless ($c->session('authenticated') == 1);
+  
+  ### Show the member area.
+  $c->render('member');
+};
+get '/member/sendmessage' => sub {
+  ### Initialize c variable.
+  my $c = shift;
+  
+  ### if the user is not authenticated then go to login.
+  $c->redirect_to('login') unless ($c->session('authenticated') == 1);
+  
+  ### Show the member area.
+  $c->render('sendmessage');
+};
+post '/member/sendmessage' => sub {
+  ### Initialize c variable.
+  my $c = shift;
+  
+  ### Initialize DB variable for MySQL access.
+  my $db = $mysql->db;
+
+  ### Initialize user input from form.
+  my $VerifyInputReceiverUsername = $c->req->body_params->param('receiverusername');
+  my $VerifyInputMembermessage = $c->req->body_params->param('membermessage');
+  
+  ### Make sure user did input all fields.
+  if ($VerifyInputReceiverUsername eq "" || $VerifyInputMembermessage eq "") 
+  {
+    my $myerror = 'Please fill in all fields.';
+    $c->stash( 
+              myerror => $myerror, 
+             ); 
+                                 
+    return $c->render(template => 'sendmessage');
+  }
+};
+get '/member/readmessages' => sub {
+  ### Initialize c variable.
+  my $c = shift;
+  
+  ### if the user is not authenticated then go to login.
+  $c->redirect_to('login') unless ($c->session('authenticated') == 1);
+  
+  ### Show the member area.
+  $c->render('member');
+};
+get '/member/downloaddb' => sub {
+  ### Initialize c variable.
+  my $c = shift;
+  
+  ### if the user is not authenticated then go to login.
+  $c->redirect_to('login') unless ($c->session('authenticated') == 1);
+  
+  ### Show the member area.
+  $c->render('member');
+};
+get '/member/downloadsource' => sub {
+  ### Initialize c variable.
+  my $c = shift;
+  
+  ### if the user is not authenticated then go to login.
+  $c->redirect_to('login') unless ($c->session('authenticated') == 1);
+  
+  ### Show the member area.
+  $c->render('member');
+};
+get '/member/mysettings' => sub {
   ### Initialize c variable.
   my $c = shift;
   
@@ -79,11 +151,11 @@ post '/emailverification' => sub {
     return $c->render(template => 'emailverification');
   }
   
-  ### Verify if code exist in DB if not error, if exist change it to 0.
+  ### Verify if code exist in DB if not error, if exist change it to verified.
   my $VerifyDBEmailverificationcode = $db->query('SELECT COUNT(1) FROM users WHERE EmailVerification = (?)', $emailverificationcode)->text;
   if ($VerifyDBEmailverificationcode == 1)
   {
-    $db->query('UPDATE users SET EmailVerification = "0" WHERE EmailVerification = (?)', $emailverificationcode);
+    $db->query('UPDATE users SET EmailVerification = "verified" WHERE EmailVerification = (?)', $emailverificationcode);
 
     return $c->redirect_to('login/emailverified');
   } else {
@@ -138,13 +210,13 @@ post '/login' => sub {
   
   ### Initialize DB variable for MySQL access.
   my $db = $mysql->db;
-  
+
   ### Initialize user input from form.
   my $VerifyInputUsername = $c->req->body_params->param('username');
   my $VerifyInputPassword = $c->req->body_params->param('password');
 
   ### If user input is empty then error.
-  if ($VerifyInputUsername eq "" | $VerifyInputPassword eq "") 
+  if ($VerifyInputUsername eq "" || $VerifyInputPassword eq "") 
   {
     my $myerror = 'Please fill in all fields.';
     $c->stash( 
@@ -196,10 +268,17 @@ post '/login' => sub {
   } else {
     $DBPasswordMatch = "yes";
   }
-  
+
   ### If username and password match then set a session and go to member area.
   if ($DBPasswordMatch eq "yes" && $DBUsernameMatch eq "yes")
   {
+    my $CheckEmailVerification = $db->query('SELECT EmailVerification FROM users WHERE UserName = (?)', $VerifyInputUsername)->text;
+	$CheckEmailVerification =~ s/\W//g;
+    if ($CheckEmailVerification ne 'verified') 
+    {
+      return $c->redirect_to('emailverification');
+    }
+
 	$c->session( 'username' => $VerifyInputUsername );
 	$c->session( 'authenticated' => 1 );
 	$c->redirect_to('member');
@@ -226,7 +305,7 @@ post '/register' => sub {
   my $VerifyInputPasswordverify = $c->req->body_params->param('passwordverify');
   
   ### Check if any field is empty if so error.  
-  if ($VerifyInputLastname eq "" | $VerifyInputFirstname eq "" | $VerifyInputEmail eq "" | $VerifyInputUsername eq "" | $VerifyInputPassword eq "" | $VerifyInputPasswordverify eq "") 
+  if ($VerifyInputLastname eq "" || $VerifyInputFirstname eq "" || $VerifyInputEmail eq "" || $VerifyInputUsername eq "" || $VerifyInputPassword eq "" || $VerifyInputPasswordverify eq "") 
   {
     my $myerror = 'Please fill in all fields.';
     $c->stash( 
@@ -237,7 +316,7 @@ post '/register' => sub {
   }
 
   ### Make sure first name, lastname and username are only alphanumeric characters.
-  if ($VerifyInputLastname !~ /^[a-zA-Z]+$/ | $VerifyInputFirstname !~ /^[a-zA-Z]+$/ | $VerifyInputUsername !~ /^[a-zA-Z]+$/){
+  if ($VerifyInputLastname !~ /^[a-zA-Z]+$/ || $VerifyInputFirstname !~ /^[a-zA-Z]+$/ || $VerifyInputUsername !~ /^[a-zA-Z]+$/){
     my $myerror = 'You can use only alphanumeric characters for "username"';
     $c->stash( 
                  myerror => $myerror, 
@@ -259,7 +338,7 @@ post '/register' => sub {
   }
   
   ### Verify that user typed same password twice.
-  if ($VerifyInputPassword ne $VerifyInputPasswordverify | $VerifyInputPasswordverify ne $VerifyInputPassword){
+  if ($VerifyInputPassword ne $VerifyInputPasswordverify || $VerifyInputPasswordverify ne $VerifyInputPassword){
     my $myerror = 'passwords did not match';
     $c->stash( 
                  myerror => $myerror, 
@@ -844,6 +923,41 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;      
 }
+
+.sidenav {
+    width: 250px;
+    position: fixed;
+    z-index: 1;
+    top: 20px;
+    left: 10px;
+    background: #FFFFFF;
+    overflow-x: hidden;
+    padding: 8px 0;
+}
+
+.sidenav a {
+    font-family: "Lato", sans-serif;
+    padding: 6px 8px 6px 16px;
+    text-decoration: none;
+    font-size: 25px;
+    color: #2196F3;
+    display: block;
+}
+
+.sidenav a:hover {
+    color: #064579;
+}
+
+.main {
+    margin-left: 140px; /* Same width as the sidebar + left position in px */
+    font-size: 28px; /* Increased text to enable scrolling */
+    padding: 0px 10px;
+}
+
+@media screen and (max-height: 450px) {
+    .sidenav {padding-top: 15px;}
+    .sidenav a {font-size: 18px;}
+}
 </style>
 <script>
 $('.message a').click(function(){
@@ -853,13 +967,192 @@ $('.message a').click(function(){
 </head>
 
 <body>
+<div class="sidenav">
+  <a href="/member/sendmessage">Send Message</a>
+  <a href="/member/readmessages">Read Messages</a>
+  <a href="/member/downloaddb">Download DB</a>
+  <a href="/member/downloadsource">Download Source</a>
+  <a href="/member/mysettings">My Settings</a>
+</div>
+
+<div class="login-page">
+  <div class="form">
+    <form class="login-form" action="/message" method="post">
+      <center><font size="6"><p style="color:green"><b>Welcome to the Members area!</b><p><font></center>
+	  <center><font size="3"><p style="color:green"><b>Please use the menu on the left to choose what you wish to do.</b><p><font></center>
+    </form>
+  </div>
+</div>
+</body>
+
+</html>
+
+@@ sendmessage.html.ep
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Cybersecurity Capstone Project - Register</title>
+<style>
+@import url(https://fonts.googleapis.com/css?family=Roboto:300);
+
+.login-page {
+  width: 360px;
+  padding: 8% 0 0;
+  margin: auto;
+}
+.form {
+  position: relative;
+  z-index: 1;
+  background: #FFFFFF;
+  max-width: 360px;
+  margin: 0 auto 100px;
+  padding: 45px;
+  text-align: center;
+  box-shadow: 0 0 20px 0 rgba(0, 0, 0, 0.2), 0 5px 5px 0 rgba(0, 0, 0, 0.24);
+}
+.form input {
+  font-family: "Roboto", sans-serif;
+  outline: 0;
+  background: #f2f2f2;
+  width: 100%;
+  border: 0;
+  margin: 0 0 15px;
+  padding: 15px;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+.form button {
+  font-family: "Roboto", sans-serif;
+  text-transform: uppercase;
+  outline: 0;
+  background: #4CAF50;
+  width: 100%;
+  border: 0;
+  padding: 15px;
+  color: #FFFFFF;
+  font-size: 14px;
+  -webkit-transition: all 0.3 ease;
+  transition: all 0.3 ease;
+  cursor: pointer;
+}
+.form button:hover,.form button:active,.form button:focus {
+  background: #43A047;
+}
+.form .message {
+  margin: 15px 0 0;
+  color: #b3b3b3;
+  font-size: 12px;
+}
+.form .message a {
+  color: #4CAF50;
+  text-decoration: none;
+}
+.form .register-form {
+  display: none;
+}
+.container {
+  position: relative;
+  z-index: 1;
+  max-width: 300px;
+  margin: 0 auto;
+}
+.container:before, .container:after {
+  content: "";
+  display: block;
+  clear: both;
+}
+.container .info {
+  margin: 50px auto;
+  text-align: center;
+}
+.container .info h1 {
+  margin: 0 0 15px;
+  padding: 0;
+  font-size: 36px;
+  font-weight: 300;
+  color: #1a1a1a;
+}
+.container .info span {
+  color: #4d4d4d;
+  font-size: 12px;
+}
+.container .info span a {
+  color: #000000;
+  text-decoration: none;
+}
+.container .info span .fa {
+  color: #EF3B3A;
+}
+body {
+  background: #76b852; /* fallback for old browsers */
+  background: -webkit-linear-gradient(right, #76b852, #8DC26F);
+  background: -moz-linear-gradient(right, #76b852, #8DC26F);
+  background: -o-linear-gradient(right, #76b852, #8DC26F);
+  background: linear-gradient(to left, #76b852, #8DC26F);
+  font-family: "Roboto", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;      
+}
+
+.sidenav {
+    width: 250px;
+    position: fixed;
+    z-index: 1;
+    top: 20px;
+    left: 10px;
+    background: #FFFFFF;
+    overflow-x: hidden;
+    padding: 8px 0;
+}
+
+.sidenav a {
+    font-family: "Lato", sans-serif;
+    padding: 6px 8px 6px 16px;
+    text-decoration: none;
+    font-size: 25px;
+    color: #2196F3;
+    display: block;
+}
+
+.sidenav a:hover {
+    color: #064579;
+}
+
+.main {
+    margin-left: 140px; /* Same width as the sidebar + left position in px */
+    font-size: 28px; /* Increased text to enable scrolling */
+    padding: 0px 10px;
+}
+
+@media screen and (max-height: 450px) {
+    .sidenav {padding-top: 15px;}
+    .sidenav a {font-size: 18px;}
+}
+</style>
+<script>
+$('.message a').click(function(){
+   $('form').animate({height: "toggle", opacity: "toggle"}, "slow");
+});
+</script>
+</head>
+
+<body>
+<div class="sidenav">
+  <b><a href="/member/sendmessage" style="color:red">Send Message</a></b>
+  <a href="/member/readmessages">Read Messages</a>
+  <a href="/member/downloaddb">Download DB</a>
+  <a href="/member/downloadsource">Download Source</a>
+  <a href="/member/mysettings">My Settings</a>
+</div>
+
 <div class="login-page">
 <center><font size="6"><p style="color:red"><b><%= stash "myerror" %></b><p><font></center>
   <div class="form">
-    <form class="login-form" action="/message" method="post">
-	  <input type="text" name="Username" placeholder="Recipient Username"/>
-	  <input type="text" name="messagetext" placeholder="message text"/>
-      <button>Send Your Message</button>
+    <form class="login-form" action="/member/sendmessage" method="post">
+	  <input type="text" name="receiverusername" placeholder="Receivers Username"/>
+      <textarea name="membermessage" rows="10" cols="30">Type your message.</textarea>
+	  <button>Send Message</button>
     </form>
   </div>
 </div>
