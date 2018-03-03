@@ -1,4 +1,6 @@
 #!/usr/bin/env perl
+
+### All the additional perl modules required for this script to run.
 use Mojolicious::Lite;
 use Mojo::mysql;
 use Mojolicious::Plugin::DefaultHelpers;
@@ -14,31 +16,40 @@ use Email::Simple::Creator ();
 use MIME::Base64;
 use Authen::SASL;
 
+### Variables required for smtp to work, I use AWS SES smtp server myself.
 my $smtpserver = '';
 my $smtpport = 587;
 my $smtpuser   = '';
 my $smtppassword = '';
 
+### Set a empty "myerror" variable. (no longer sure why i did this)
 my $myerror;
-my $key = 'YOU SECRET KEY HERE';
+
+### Initialize how we want to encrypt, we use AES with a 256bit key, you must specify a key yourself.
+my $key = 'YOUR KEY HERE!!!';
 my $cipher = Crypt::CBC->new(
     -key       => $key,
     -keylength => '256',
     -cipher    => "Crypt::OpenSSL::AES"
 );
 
+### Initialize how we connect to MySQL.
 my $mysql = Mojo::mysql->new('mysql://USERNAME:PASSWORD@localhost/CAPSTONE');
 
+### Mojolicious route stuff.
 get '/' => 'index';
 get '/emailverification' => 'emailverification';
 get '/index.html' => 'index';
 get '/login' => 'login';
 post '/login' => sub {
+  ### Initialize c variable.
   my $c = shift;
   
+  ### Initialize user input from form.
   my $VerifyInputUsername = $c->req->body_params->param('username');
   my $VerifyInputPassword = $c->req->body_params->param('password');
 
+  ### If user input is empty then error.
   if ($VerifyInputUsername eq "" | $VerifyInputPassword eq "") 
   {
     my $myerror = 'Please fill in all fields.';
@@ -49,6 +60,7 @@ post '/login' => sub {
     return $c->render(template => 'login');
   }
   
+  ### make sure username are only alphanumeric characters.
   if ($VerifyInputUsername !~ /^[a-zA-Z]+$/)
   {
     my $myerror = 'You can use only alphanumeric characters for "username"';
@@ -59,21 +71,25 @@ post '/login' => sub {
     return $c->render(template => 'login');
   }
   
+  ### Encrypt the user input so we can compare it with database.
   my $username = $cipher->encrypt_hex($c->req->body_params->param('username'));
   my $password = $cipher->encrypt_hex($c->req->body_params->param('password'));
   
 };
 get '/register' => 'register';
 post '/register' => sub {
+  ### Initialize c variable.
   my $c = shift;
   
+  ### Get all the input variables from the form.  
   my $VerifyInputLastname = $c->req->body_params->param('lastname');
   my $VerifyInputFirstname = $c->req->body_params->param('firstname');
   my $VerifyInputEmail = $c->req->body_params->param('email');
   my $VerifyInputUsername = $c->req->body_params->param('username');
   my $VerifyInputPassword = $c->req->body_params->param('password');
   my $VerifyInputPasswordverify = $c->req->body_params->param('passwordverify');
-    
+  
+  ### Check if any field is empty if so error.  
   if ($VerifyInputLastname eq "" | $VerifyInputFirstname eq "" | $VerifyInputEmail eq "" | $VerifyInputUsername eq "" | $VerifyInputPassword eq "" | $VerifyInputPasswordverify eq "") 
   {
     my $myerror = 'Please fill in all fields.';
@@ -84,6 +100,7 @@ post '/register' => sub {
     return $c->render(template => 'register');
   }
 
+  ### Make sure first name, lastname and username are only alphanumeric characters.
   if ($VerifyInputLastname !~ /^[a-zA-Z]+$/ | $VerifyInputFirstname !~ /^[a-zA-Z]+$/ | $VerifyInputUsername !~ /^[a-zA-Z]+$/){
     my $myerror = 'You can use only alphanumeric characters for "username"';
     $c->stash( 
@@ -93,6 +110,7 @@ post '/register' => sub {
     return $c->render(template => 'register');
   }
   
+  ### Check the the inputed email is really a email.
   if (Email::Valid->address($VerifyInputEmail)) {
   # meh no idea how to only check wrong.
   } else {
@@ -104,6 +122,7 @@ post '/register' => sub {
     return $c->render(template => 'register'); 
   }
   
+  ### Verify that user typed same password twice.
   if ($VerifyInputPassword ne $VerifyInputPasswordverify | $VerifyInputPasswordverify ne $VerifyInputPassword){
     my $myerror = 'passwords did not match';
     $c->stash( 
@@ -113,40 +132,70 @@ post '/register' => sub {
     return $c->render(template => 'register'); 
   }
   
-  my $lastname = $cipher->encrypt_hex($c->req->body_params->param('lastname'));
-  my $firstname = $cipher->encrypt_hex($c->req->body_params->param('firstname'));
-  my $email = $cipher->encrypt_hex($c->req->body_params->param('email'));
-  my $username = $cipher->encrypt_hex($c->req->body_params->param('username'));
-  my $password = $cipher->encrypt_hex($c->req->body_params->param('password'));
+  ### Encrypt all user input.
+  my $EncryptedLastname = $cipher->encrypt_hex($c->req->body_params->param('lastname'));
+  my $EncryptedFirstname = $cipher->encrypt_hex($c->req->body_params->param('firstname'));
+  my $EncryptedEmail = $cipher->encrypt_hex($c->req->body_params->param('email'));
+  my $EncryptedUsername = $cipher->encrypt_hex($c->req->body_params->param('username'));
+  my $EncryptedPassword = $cipher->encrypt_hex($c->req->body_params->param('password'));
   my $emailverification = random_string("..........");
 
+  ### Initialize DB variable for MySQL access.
   my $db = $mysql->db;
-  $db->query('INSERT INTO users (LastName, FirstName, Email, UserName, Password, EmailVerification) VALUES (?, ?, ?, ?, ?, ?)', $lastname, $firstname, $email, $username, $password, $emailverification);
-  
-my $transport = Email::Sender::Transport::SMTP->new({
-  host => $smtpserver,
-  port => $smtpport,
-  ssl => "starttls",
-  sasl_username => $smtpuser,
-  sasl_password => $smtppassword,
-});
 
-my $smtpemail = Email::Simple->create(
-  header => [
-    To      => "$VerifyInputEmail",
-    From    => 'hello@ulyaoth.net',
-    Subject => 'Cybersecurity Capston Project - Verify Email',
-  ],
-  body => "Please verify your email with this code: $emailverification\n url: http://cybersecurity-capstone-project.ulyaoth.net/emailverification",
-);
+  ### Verify user input of UserName if it already exists in DB.
+  my $VerifyDBUsername = $db->query('SELECT UserName from users where UserName = (?', $EncryptedUsername);
+  if ($VerifyDBUsername eq $EncryptedUsername) 
+  {
+    my $myerror = 'UserName is invalid please choose another one.';
+    $c->stash( 
+                 myerror => $myerror, 
+                ); 
+                                 
+    return $c->render(template => 'register');
+  }
 
-sendmail($smtpemail, { transport => $transport });
+  ### Verify user input of Email if it already exists in DB.
+  my $VerifyDBEmail = $db->query('SELECT Email from users where Email = (?', $EncryptedEmail);
+  if ($VerifyDBEmail eq $EncryptedEmail) 
+  {
+    my $myerror = 'UserName is invalid please choose another one.';
+    $c->stash( 
+                 myerror => $myerror, 
+                ); 
+                                 
+    return $c->render(template => 'register');
+  }  
+
+  ### Insert all encrypted information into "users" table in DB.
+  $db->query('INSERT INTO users (LastName, FirstName, Email, UserName, Password, EmailVerification) VALUES (?, ?, ?, ?, ?, ?)', $EncryptedLastname, $EncryptedFirstname, $EncryptedEmail, $EncryptedUsername, $EncryptedPassword, $emailverification);
   
+  ### Sent the Email Verification code to user specified email address with encrypted smtp.
+  my $transport = Email::Sender::Transport::SMTP->new({
+    host => $smtpserver,
+    port => $smtpport,
+    ssl => "starttls",
+    sasl_username => $smtpuser,
+    sasl_password => $smtppassword,
+  });
+
+  my $smtpemail = Email::Simple->create(
+    header => [
+      To      => "$VerifyInputEmail",
+      From    => 'hello@ulyaoth.net',
+      Subject => 'Verify Email - Cybersecurity Capston Project',
+    ],
+    body => "Please verify your email with this code: $emailverification\n url: http://cybersecurity-capstone-project.ulyaoth.net/emailverification",
+  );
+
+  sendmail($smtpemail, { transport => $transport });
+  
+  ### Move user web page to email verification.
   $c->redirect_to('emailverification');
   };
   
 
-
+### Mojolicious html templates.
 app->start;
 __DATA__
 @@ index.html.ep
