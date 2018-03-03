@@ -4,6 +4,9 @@
 use Mojolicious::Lite;
 use Mojo::mysql;
 use Mojolicious::Plugin::DefaultHelpers;
+use Mojolicious::Plugin::Authentication;
+use Mojolicious::Sessions;
+use Mojo::Util qw(secure_compare);
 use String::Random qw(random_regex random_string);
 use strict;
 use warnings;
@@ -26,7 +29,7 @@ my $smtppassword = '';
 my $myerror;
 
 ### Initialize how we want to encrypt, we use AES with a 256bit key, you must specify a key yourself.
-my $key = 'YOUR KEY HERE';
+my $key = 'YOUR SECRET HERE!';
 my $cipher = Crypt::CBC->new(
     -key       => $key,
     -keylength => '256',
@@ -37,7 +40,23 @@ my $cipher = Crypt::CBC->new(
 my $mysql = Mojo::mysql->new('mysql://USERNAME:PASSWORD@localhost/CAPSTONE');
 
 ### Mojolicious route stuff.
-get '/' => 'index';
+get '/'  => sub {
+  ### Initialize c variable.
+  my $c = shift;
+  
+  ### if the user is authenticated then go to login.
+  $c->redirect_to('member') unless ($c->session('authenticated') != 1);
+} => 'index';
+get '/member' => sub {
+  ### Initialize c variable.
+  my $c = shift;
+  
+  ### if the user is not authenticated then go to login.
+  $c->redirect_to('login') unless ($c->session('authenticated') == 1);
+  
+  ### Show the member area.
+  $c->render('member');
+};
 get '/emailverification' => 'emailverification';
 post '/emailverification' => sub {
   ### Initialize c variable.
@@ -76,8 +95,33 @@ post '/emailverification' => sub {
     return $c->render(template => 'emailverification');
   }
 };
-get '/index.html' => 'index';
-get '/login' => 'login';
+get '/logout' => sub {
+  ### Initialize c variable.
+  my $c = shift;
+  
+  ### if the user is authenticated continue else go to login.
+  $c->redirect_to('login') unless ($c->session('authenticated') == 1);
+  
+  ### Expire session if user is authenticated to logout.
+  $c->session(expires => 1);
+  
+  ### Redirect to login page.
+  $c->redirect_to('login');
+};
+get '/index.html' => sub {
+  ### Initialize c variable.
+  my $c = shift;
+  
+  ### if the user is authenticated then go to member area.
+  $c->redirect_to('member') unless ($c->session('authenticated') != 1);
+} => 'index';
+get '/login' => sub {
+  ### Initialize c variable.
+  my $c = shift;
+  
+  ### if the user is authenticated then go to member area.
+  $c->redirect_to('member') unless ($c->session('authenticated') != 1);
+} => 'login';
 get '/login/emailverified' => sub {
   ### Initialize c variable.
   my $c = shift;
@@ -153,14 +197,20 @@ post '/login' => sub {
     $DBPasswordMatch = "yes";
   }
   
-  ### If username and password match then login.
+  ### If username and password match then set a session and go to member area.
   if ($DBPasswordMatch eq "yes" && $DBUsernameMatch eq "yes")
   {
-    return $c->render(text => 'Logged in!');
+	$c->session( 'username' => $VerifyInputUsername );
+	$c->session( 'authenticated' => 1 );
+	$c->redirect_to('member');
   } else {
-    return $c->render(text => 'Wrong username/password', status => 403);
+    my $myerror = 'UserName or Password is invalid.';
+    $c->stash( 
+                 myerror => $myerror, 
+                ); 
+                                 
+    return $c->render(template => 'login');
   }
-  
 };
 get '/register' => 'register';
 post '/register' => sub {
@@ -277,7 +327,10 @@ post '/register' => sub {
   ### Move user web page to email verification.
   $c->redirect_to('emailverification');
   };
+
   
+### Set a app secret  
+app->secrets(['YOUR SECRET HERE']);
 
 ### Mojolicious html templates.
 app->start;
@@ -677,6 +730,136 @@ $('.message a').click(function(){
       <button>Verify Email</button>
       <p class="message">Already registered? <a href="login">Sign In</a></p>
 	  <p class="message">No yet registered? <a href="register">Register Now</a></p>
+    </form>
+  </div>
+</div>
+</body>
+
+</html>
+
+@@ member.html.ep
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Cybersecurity Capstone Project - Register</title>
+<style>
+@import url(https://fonts.googleapis.com/css?family=Roboto:300);
+
+.login-page {
+  width: 360px;
+  padding: 8% 0 0;
+  margin: auto;
+}
+.form {
+  position: relative;
+  z-index: 1;
+  background: #FFFFFF;
+  max-width: 360px;
+  margin: 0 auto 100px;
+  padding: 45px;
+  text-align: center;
+  box-shadow: 0 0 20px 0 rgba(0, 0, 0, 0.2), 0 5px 5px 0 rgba(0, 0, 0, 0.24);
+}
+.form input {
+  font-family: "Roboto", sans-serif;
+  outline: 0;
+  background: #f2f2f2;
+  width: 100%;
+  border: 0;
+  margin: 0 0 15px;
+  padding: 15px;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+.form button {
+  font-family: "Roboto", sans-serif;
+  text-transform: uppercase;
+  outline: 0;
+  background: #4CAF50;
+  width: 100%;
+  border: 0;
+  padding: 15px;
+  color: #FFFFFF;
+  font-size: 14px;
+  -webkit-transition: all 0.3 ease;
+  transition: all 0.3 ease;
+  cursor: pointer;
+}
+.form button:hover,.form button:active,.form button:focus {
+  background: #43A047;
+}
+.form .message {
+  margin: 15px 0 0;
+  color: #b3b3b3;
+  font-size: 12px;
+}
+.form .message a {
+  color: #4CAF50;
+  text-decoration: none;
+}
+.form .register-form {
+  display: none;
+}
+.container {
+  position: relative;
+  z-index: 1;
+  max-width: 300px;
+  margin: 0 auto;
+}
+.container:before, .container:after {
+  content: "";
+  display: block;
+  clear: both;
+}
+.container .info {
+  margin: 50px auto;
+  text-align: center;
+}
+.container .info h1 {
+  margin: 0 0 15px;
+  padding: 0;
+  font-size: 36px;
+  font-weight: 300;
+  color: #1a1a1a;
+}
+.container .info span {
+  color: #4d4d4d;
+  font-size: 12px;
+}
+.container .info span a {
+  color: #000000;
+  text-decoration: none;
+}
+.container .info span .fa {
+  color: #EF3B3A;
+}
+body {
+  background: #76b852; /* fallback for old browsers */
+  background: -webkit-linear-gradient(right, #76b852, #8DC26F);
+  background: -moz-linear-gradient(right, #76b852, #8DC26F);
+  background: -o-linear-gradient(right, #76b852, #8DC26F);
+  background: linear-gradient(to left, #76b852, #8DC26F);
+  font-family: "Roboto", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;      
+}
+</style>
+<script>
+$('.message a').click(function(){
+   $('form').animate({height: "toggle", opacity: "toggle"}, "slow");
+});
+</script>
+</head>
+
+<body>
+<div class="login-page">
+<center><font size="6"><p style="color:red"><b><%= stash "myerror" %></b><p><font></center>
+  <div class="form">
+    <form class="login-form" action="/message" method="post">
+	  <input type="text" name="Username" placeholder="Recipient Username"/>
+	  <input type="text" name="messagetext" placeholder="message text"/>
+      <button>Send Your Message</button>
     </form>
   </div>
 </div>
