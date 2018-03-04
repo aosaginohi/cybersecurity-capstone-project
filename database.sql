@@ -16,7 +16,7 @@ CREATE TABLE users (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 CREATE TABLE `messages` (
-  `id` text(65535) NOT NULL,
+  `to_user` text(65535) NOT NULL,
   `from_user` text(65535) NOT NULL,
   `message` text(65535) NOT NULL,
   `datetime` text(65535) NOT NULL

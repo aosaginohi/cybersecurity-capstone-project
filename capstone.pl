@@ -6,6 +6,7 @@ use Mojo::mysql;
 use Mojolicious::Plugin::DefaultHelpers;
 use Mojolicious::Plugin::Authentication;
 use Mojolicious::Sessions;
+use Mojolicious::Plugin::RenderFile;
 use Mojo::Util qw(secure_compare);
 use String::Random qw(random_regex random_string);
 use strict;
@@ -18,6 +19,9 @@ use Email::Simple ();
 use Email::Simple::Creator ();
 use MIME::Base64;
 use Authen::SASL;
+use DateTime;
+
+plugin 'RenderFile';
 
 ### Variables required for smtp to work, I use AWS SES smtp server myself.
 my $smtpserver = '';
@@ -29,7 +33,7 @@ my $smtppassword = '';
 my $myerror;
 
 ### Initialize how we want to encrypt, we use AES with a 256bit key, you must specify a key yourself.
-my $key = 'YOUR SECRET HERE';
+my $key = 'YOUR SECRET KEY!';
 my $cipher = Crypt::CBC->new(
     -key       => $key,
     -keylength => '256',
@@ -47,6 +51,13 @@ get '/'  => sub {
   ### if the user is authenticated then go to login.
   $c->redirect_to('member') unless ($c->session('authenticated') != 1);
 } => 'index';
+get '/dbdump' => sub {
+  ### Initialize c variable.
+  my $c = shift;
+
+  ### Download database dump file
+  $c->render_file('filepath' => '/srv/capstone/public/dbdump/dbdump.sql');
+};
 get '/member' => sub {
   ### Initialize c variable.
   my $c = shift;
@@ -57,23 +68,34 @@ get '/member' => sub {
   ### Show the member area.
   $c->render('member');
 };
-get '/member/sendmessage' => sub {
+get '/member/messages' => sub {
   ### Initialize c variable.
   my $c = shift;
-  
+ 
+  ### Initialize DB variable for MySQL access.
+  my $db = $mysql->db;
+ 
   ### if the user is not authenticated then go to login.
   $c->redirect_to('login') unless ($c->session('authenticated') == 1);
-  
+ 
+  my $results = $db->query('select from_user, datetime, message from messages where to_user = (?) order by datetime', $c->session('username'));
+  my $rows = $results->arrays;
+  for my $row (@$rows) { $row->[2] = $cipher->decrypt_hex($row->[2]) }  
+  $c->stash( rows => $rows );
+ 
   ### Show the member area.
-  $c->render('sendmessage');
+  $c->render('messages');
 };
-post '/member/sendmessage' => sub {
+post '/member/messages' => sub {
   ### Initialize c variable.
   my $c = shift;
   
   ### Initialize DB variable for MySQL access.
   my $db = $mysql->db;
 
+  my $results = $db->query('select from_user, datetime, message from messages where to_user = (?) order by datetime', $c->session('username'));
+  my $rows = $results->arrays;
+    
   ### Initialize user input from form.
   my $VerifyInputReceiverUsername = $c->req->body_params->param('receiverusername');
   my $VerifyInputMembermessage = $c->req->body_params->param('membermessage');
@@ -83,41 +105,70 @@ post '/member/sendmessage' => sub {
   {
     my $myerror = 'Please fill in all fields.';
     $c->stash( 
-              myerror => $myerror, 
+              myerror => $myerror,
+			  rows => $rows,
              ); 
                                  
-    return $c->render(template => 'sendmessage');
+    return $c->render(template => 'messages');
   }
+  
+  ### make sure username are only alphanumeric characters.
+  if ($VerifyInputReceiverUsername !~ /^[a-zA-Z]+$/)
+  {
+    my $myerror = 'You can use only alphanumeric characters for the receivers "username"';
+    $c->stash( 
+              myerror => $myerror,
+			  rows => $rows,
+                ); 
+                                 
+    return $c->render(template => 'messages');
+  }
+
+  ### Do not sent message to yourself.
+  if ($VerifyInputReceiverUsername eq $c->session('username'))
+  {
+    my $myerror = 'Why would you message yourself?';
+    $c->stash( 
+              myerror => $myerror,
+			  rows => $rows,
+                ); 
+                                 
+    return $c->render(template => 'messages');
+  }
+  
+  ### Check if receivers name exist.
+  my $VerifyDBUsername = $db->query('SELECT COUNT(1) FROM users WHERE UserName = (?)', $VerifyInputReceiverUsername)->text;
+  $VerifyDBUsername =~ s/\W//g;
+  if ($VerifyDBUsername != 1) 
+  {
+    my $myerror = 'Receivers Username does not exist.';
+    $c->stash( 
+              myerror => $myerror,
+			  rows => $rows,
+                ); 
+                                 
+    return $c->render(template => 'messages');
+  }
+  
+  ### Insert messages into database.
+  my $EncryptedMessage = $cipher->encrypt_hex($VerifyInputMembermessage);
+  my $dt = DateTime->now;
+  $db->query('INSERT INTO messages (to_user, from_user, message, datetime) VALUES (?, ?, ?, ?)', $VerifyInputReceiverUsername, $c->session('username'), $EncryptedMessage, $dt);
+
+  my $myerror = 'Your message has been sent!.';
+  $c->stash( 
+              myerror => $myerror,
+			  rows => $rows,
+           ); 
+
+  return $c->render(template => 'messages');  
 };
-get '/member/readmessages' => sub {
+get '/source' => sub {
   ### Initialize c variable.
   my $c = shift;
-  
-  ### if the user is not authenticated then go to login.
-  $c->redirect_to('login') unless ($c->session('authenticated') == 1);
-  
-  ### Show the member area.
-  $c->render('member');
-};
-get '/member/downloaddb' => sub {
-  ### Initialize c variable.
-  my $c = shift;
-  
-  ### if the user is not authenticated then go to login.
-  $c->redirect_to('login') unless ($c->session('authenticated') == 1);
-  
-  ### Show the member area.
-  $c->render('member');
-};
-get '/member/downloadsource' => sub {
-  ### Initialize c variable.
-  my $c = shift;
-  
-  ### if the user is not authenticated then go to login.
-  $c->redirect_to('login') unless ($c->session('authenticated') == 1);
-  
-  ### Show the member area.
-  $c->render('member');
+
+  ### Download database dump file
+  $c->render_file('filepath' => '/srv/capstone/public/source/source.zip');
 };
 get '/member/mysettings' => sub {
   ### Initialize c variable.
@@ -409,7 +460,7 @@ post '/register' => sub {
 
   
 ### Set a app secret  
-app->secrets(['YOUR SECRET HERE']);
+app->secrets(['YOUR SECRET KEY!!!']);
 
 ### Mojolicious html templates.
 app->start;
@@ -530,14 +581,17 @@ $('.message a').click(function(){
 </head>
 
 <body>
+
+<center><font size="6"><p style="color:white"><b>Cybersecurity CAPSTONE Project</b><p><font></center>
+<center><font size="4"><p style="color:red"><b><%= stash "myerror" %></b><p><font></center>
 <div class="login-page">
-<center><font size="6"><p style="color:red"><b><%= stash "myerror" %></b><p><font></center>
   <div class="form">
     <form class="login-form" action="/login" method="post">
 	  <input type="text" name="username" placeholder="Username"/>
       <input type="password" name="password" placeholder="Password"/>
       <button>login</button>
       <p class="message">Not registered? <a href="register">Create an account</a></p>
+	  <p class="message">Reset Password? <a href="resetpassword">Reset Password</a></p>
 	  <p class="message">Verify your email? <a href="emailverification">Verify Email</a></p>
     </form>
   </div>
@@ -665,8 +719,10 @@ $('.message a').click(function(){
 </head>
 
 <body>
+
+<center><font size="6"><p style="color:white"><b>Cybersecurity CAPSTONE Project - Register</b><p><font></center>
+<center><font size="4"><p style="color:red"><b><%= stash "myerror" %></b><p><font></center>
 <div class="login-page">
-<center><font size="6"><p style="color:red"><b><%= stash "myerror" %></b><p><font></center>
   <div class="form">
     <form class="login-form" action="/register" method="post">
 	  <input type="text" name="username" placeholder="Username"/>
@@ -677,6 +733,7 @@ $('.message a').click(function(){
 	  <input type="text" name="email" placeholder="Email"/>
       <button>register</button>
       <p class="message">Already registered? <a href="login">Sign In</a></p>
+	  <p class="message">Reset Password? <a href="resetpassword">Reset Password</a></p>
 	  <p class="message">Verify your email? <a href="emailverification">Verify Email</a></p>
     </form>
   </div>
@@ -690,7 +747,7 @@ $('.message a').click(function(){
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Cybersecurity Capstone Project - Register</title>
+<title>Cybersecurity Capstone Project - Email Verification</title>
 <style>
 @import url(https://fonts.googleapis.com/css?family=Roboto:300);
 
@@ -801,14 +858,484 @@ $('.message a').click(function(){
 </head>
 
 <body>
+
+<center><font size="6"><p style="color:white"><b>Cybersecurity CAPSTONE Project - Email Verification</b><p><font></center>
+<center><font size="4"><p style="color:red"><b><%= stash "myerror" %></b><p><font></center>
 <div class="login-page">
-<center><font size="6"><p style="color:red"><b><%= stash "myerror" %></b><p><font></center>
   <div class="form">
     <form class="login-form" action="/emailverification" method="post">
 	  <input type="text" name="emailverificationcode" placeholder="Email verification code."/>
       <button>Verify Email</button>
+      <p class="message">Already registered? <a href="https://cybersecurity-capstone-project.ulyaoth.net/login">Sign In</a></p>
+	  <p class="message">No yet registered? <a href="https://cybersecurity-capstone-project.ulyaoth.net/register">Register Now</a></p>
+	  <p class="message">Reset password? <a href="https://cybersecurity-capstone-project.ulyaoth.net/resetpassword">Reset Password</a></p>
+    </form>
+  </div>
+</div>
+</body>
+
+</html>
+
+@@ resetpassword.html.ep
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Cybersecurity Capstone Project - Reset Password</title>
+<style>
+@import url(https://fonts.googleapis.com/css?family=Roboto:300);
+
+.login-page {
+  width: 360px;
+  padding: 8% 0 0;
+  margin: auto;
+}
+.form {
+  position: relative;
+  z-index: 1;
+  background: #FFFFFF;
+  max-width: 360px;
+  margin: 0 auto 100px;
+  padding: 45px;
+  text-align: center;
+  box-shadow: 0 0 20px 0 rgba(0, 0, 0, 0.2), 0 5px 5px 0 rgba(0, 0, 0, 0.24);
+}
+.form input {
+  font-family: "Roboto", sans-serif;
+  outline: 0;
+  background: #f2f2f2;
+  width: 100%;
+  border: 0;
+  margin: 0 0 15px;
+  padding: 15px;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+.form button {
+  font-family: "Roboto", sans-serif;
+  text-transform: uppercase;
+  outline: 0;
+  background: #4CAF50;
+  width: 100%;
+  border: 0;
+  padding: 15px;
+  color: #FFFFFF;
+  font-size: 14px;
+  -webkit-transition: all 0.3 ease;
+  transition: all 0.3 ease;
+  cursor: pointer;
+}
+.form button:hover,.form button:active,.form button:focus {
+  background: #43A047;
+}
+.form .message {
+  margin: 15px 0 0;
+  color: #b3b3b3;
+  font-size: 12px;
+}
+.form .message a {
+  color: #4CAF50;
+  text-decoration: none;
+}
+.form .register-form {
+  display: none;
+}
+.container {
+  position: relative;
+  z-index: 1;
+  max-width: 300px;
+  margin: 0 auto;
+}
+.container:before, .container:after {
+  content: "";
+  display: block;
+  clear: both;
+}
+.container .info {
+  margin: 50px auto;
+  text-align: center;
+}
+.container .info h1 {
+  margin: 0 0 15px;
+  padding: 0;
+  font-size: 36px;
+  font-weight: 300;
+  color: #1a1a1a;
+}
+.container .info span {
+  color: #4d4d4d;
+  font-size: 12px;
+}
+.container .info span a {
+  color: #000000;
+  text-decoration: none;
+}
+.container .info span .fa {
+  color: #EF3B3A;
+}
+body {
+  background: #76b852; /* fallback for old browsers */
+  background: -webkit-linear-gradient(right, #76b852, #8DC26F);
+  background: -moz-linear-gradient(right, #76b852, #8DC26F);
+  background: -o-linear-gradient(right, #76b852, #8DC26F);
+  background: linear-gradient(to left, #76b852, #8DC26F);
+  font-family: "Roboto", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;      
+}
+</style>
+<script>
+$('.message a').click(function(){
+   $('form').animate({height: "toggle", opacity: "toggle"}, "slow");
+});
+</script>
+</head>
+
+<body>
+
+<center><font size="6"><p style="color:white"><b>Cybersecurity CAPSTONE Project - Reset Password</b><p><font></center>
+<center><font size="4"><p style="color:red"><b><%= stash "myerror" %></b><p><font></center>
+<div class="login-page">
+  <div class="form">
+    <form class="login-form" action="/resetpasswordverify" method="post">
+	  <input type="text" name="passwordresetcode" placeholder="Password reset code."/>
+      <button>Verify Email</button>
       <p class="message">Already registered? <a href="login">Sign In</a></p>
 	  <p class="message">No yet registered? <a href="register">Register Now</a></p>
+    </form>
+  </div>
+</div>
+</body>
+
+</html>
+
+@@ not_found.html.ep
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Cybersecurity Capstone Project - Not Found</title>
+<style>
+@import url(https://fonts.googleapis.com/css?family=Roboto:300);
+
+.login-page {
+  width: 360px;
+  padding: 8% 0 0;
+  margin: auto;
+}
+.form {
+  position: relative;
+  z-index: 1;
+  background: #FFFFFF;
+  max-width: 360px;
+  margin: 0 auto 100px;
+  padding: 45px;
+  text-align: center;
+  box-shadow: 0 0 20px 0 rgba(0, 0, 0, 0.2), 0 5px 5px 0 rgba(0, 0, 0, 0.24);
+}
+.form input {
+  font-family: "Roboto", sans-serif;
+  outline: 0;
+  background: #f2f2f2;
+  width: 100%;
+  border: 0;
+  margin: 0 0 15px;
+  padding: 15px;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+.form button {
+  font-family: "Roboto", sans-serif;
+  text-transform: uppercase;
+  outline: 0;
+  background: #4CAF50;
+  width: 100%;
+  border: 0;
+  padding: 15px;
+  color: #FFFFFF;
+  font-size: 14px;
+  -webkit-transition: all 0.3 ease;
+  transition: all 0.3 ease;
+  cursor: pointer;
+}
+.form button:hover,.form button:active,.form button:focus {
+  background: #43A047;
+}
+.form .message {
+  margin: 15px 0 0;
+  color: #b3b3b3;
+  font-size: 12px;
+}
+.form .message a {
+  color: #4CAF50;
+  text-decoration: none;
+}
+.form .register-form {
+  display: none;
+}
+.container {
+  position: relative;
+  z-index: 1;
+  max-width: 300px;
+  margin: 0 auto;
+}
+.container:before, .container:after {
+  content: "";
+  display: block;
+  clear: both;
+}
+.container .info {
+  margin: 50px auto;
+  text-align: center;
+}
+.container .info h1 {
+  margin: 0 0 15px;
+  padding: 0;
+  font-size: 36px;
+  font-weight: 300;
+  color: #1a1a1a;
+}
+.container .info span {
+  color: #4d4d4d;
+  font-size: 12px;
+}
+.container .info span a {
+  color: #000000;
+  text-decoration: none;
+}
+.container .info span .fa {
+  color: #EF3B3A;
+}
+body {
+  background: #76b852; /* fallback for old browsers */
+  background: -webkit-linear-gradient(right, #76b852, #8DC26F);
+  background: -moz-linear-gradient(right, #76b852, #8DC26F);
+  background: -o-linear-gradient(right, #76b852, #8DC26F);
+  background: linear-gradient(to left, #76b852, #8DC26F);
+  font-family: "Roboto", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;      
+}
+
+.sidenav {
+    width: 250px;
+    position: fixed;
+    z-index: 1;
+    top: 20px;
+    left: 10px;
+    background: #FFFFFF;
+    overflow-x: hidden;
+    padding: 8px 0;
+}
+
+.sidenav a {
+    font-family: "Lato", sans-serif;
+    padding: 6px 8px 6px 16px;
+    text-decoration: none;
+    font-size: 25px;
+    color: #2196F3;
+    display: block;
+}
+
+.sidenav a:hover {
+    color: #064579;
+}
+
+.main {
+    margin-left: 140px; /* Same width as the sidebar + left position in px */
+    font-size: 28px; /* Increased text to enable scrolling */
+    padding: 0px 10px;
+}
+
+@media screen and (max-height: 450px) {
+    .sidenav {padding-top: 15px;}
+    .sidenav a {font-size: 18px;}
+}
+</style>
+<script>
+$('.message a').click(function(){
+   $('form').animate({height: "toggle", opacity: "toggle"}, "slow");
+});
+</script>
+</head>
+
+<body>
+<div class="sidenav">
+  <a href="https://cybersecurity-capstone-project.ulyaoth.net">Home</a>
+</div>
+
+<center><font size="6"><p style="color:white"><b>Cybersecurity CAPSTONE Project</b><p><font></center>
+<div class="login-page">
+  <div class="form">
+      <center><font size="6"><p style="color:green"><b>404 Not Found!</b><p><font></center>
+	  <center><font size="3"><p style="color:green"><b>Please use the menu on the left to go back to our home page.</b><p><font></center>
+    </form>
+  </div>
+</div>
+</body>
+
+</html>
+
+@@ exception.html.ep
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Cybersecurity Capstone Project - Exception</title>
+<style>
+@import url(https://fonts.googleapis.com/css?family=Roboto:300);
+
+.login-page {
+  width: 360px;
+  padding: 8% 0 0;
+  margin: auto;
+}
+.form {
+  position: relative;
+  z-index: 1;
+  background: #FFFFFF;
+  max-width: 360px;
+  margin: 0 auto 100px;
+  padding: 45px;
+  text-align: center;
+  box-shadow: 0 0 20px 0 rgba(0, 0, 0, 0.2), 0 5px 5px 0 rgba(0, 0, 0, 0.24);
+}
+.form input {
+  font-family: "Roboto", sans-serif;
+  outline: 0;
+  background: #f2f2f2;
+  width: 100%;
+  border: 0;
+  margin: 0 0 15px;
+  padding: 15px;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+.form button {
+  font-family: "Roboto", sans-serif;
+  text-transform: uppercase;
+  outline: 0;
+  background: #4CAF50;
+  width: 100%;
+  border: 0;
+  padding: 15px;
+  color: #FFFFFF;
+  font-size: 14px;
+  -webkit-transition: all 0.3 ease;
+  transition: all 0.3 ease;
+  cursor: pointer;
+}
+.form button:hover,.form button:active,.form button:focus {
+  background: #43A047;
+}
+.form .message {
+  margin: 15px 0 0;
+  color: #b3b3b3;
+  font-size: 12px;
+}
+.form .message a {
+  color: #4CAF50;
+  text-decoration: none;
+}
+.form .register-form {
+  display: none;
+}
+.container {
+  position: relative;
+  z-index: 1;
+  max-width: 300px;
+  margin: 0 auto;
+}
+.container:before, .container:after {
+  content: "";
+  display: block;
+  clear: both;
+}
+.container .info {
+  margin: 50px auto;
+  text-align: center;
+}
+.container .info h1 {
+  margin: 0 0 15px;
+  padding: 0;
+  font-size: 36px;
+  font-weight: 300;
+  color: #1a1a1a;
+}
+.container .info span {
+  color: #4d4d4d;
+  font-size: 12px;
+}
+.container .info span a {
+  color: #000000;
+  text-decoration: none;
+}
+.container .info span .fa {
+  color: #EF3B3A;
+}
+body {
+  background: #76b852; /* fallback for old browsers */
+  background: -webkit-linear-gradient(right, #76b852, #8DC26F);
+  background: -moz-linear-gradient(right, #76b852, #8DC26F);
+  background: -o-linear-gradient(right, #76b852, #8DC26F);
+  background: linear-gradient(to left, #76b852, #8DC26F);
+  font-family: "Roboto", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;      
+}
+
+.sidenav {
+    width: 250px;
+    position: fixed;
+    z-index: 1;
+    top: 20px;
+    left: 10px;
+    background: #FFFFFF;
+    overflow-x: hidden;
+    padding: 8px 0;
+}
+
+.sidenav a {
+    font-family: "Lato", sans-serif;
+    padding: 6px 8px 6px 16px;
+    text-decoration: none;
+    font-size: 25px;
+    color: #2196F3;
+    display: block;
+}
+
+.sidenav a:hover {
+    color: #064579;
+}
+
+.main {
+    margin-left: 140px; /* Same width as the sidebar + left position in px */
+    font-size: 28px; /* Increased text to enable scrolling */
+    padding: 0px 10px;
+}
+
+@media screen and (max-height: 450px) {
+    .sidenav {padding-top: 15px;}
+    .sidenav a {font-size: 18px;}
+}
+</style>
+<script>
+$('.message a').click(function(){
+   $('form').animate({height: "toggle", opacity: "toggle"}, "slow");
+});
+</script>
+</head>
+
+<body>
+<div class="sidenav">
+  <a href="https://cybersecurity-capstone-project.ulyaoth.net">Home</a>
+</div>
+
+<center><font size="6"><p style="color:white"><b>Cybersecurity CAPSTONE Project</b><p><font></center>
+<div class="login-page">
+  <div class="form">
+      <center><font size="6"><p style="color:green"><b>500 Exception!</b><p><font></center>
+	  <center><font size="3"><p style="color:green"><b>Please use the menu on the left to go back to our home page.</b><p><font></center>
     </form>
   </div>
 </div>
@@ -821,7 +1348,7 @@ $('.message a').click(function(){
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Cybersecurity Capstone Project - Register</title>
+<title>Cybersecurity Capstone Project - Member</title>
 <style>
 @import url(https://fonts.googleapis.com/css?family=Roboto:300);
 
@@ -968,13 +1495,15 @@ $('.message a').click(function(){
 
 <body>
 <div class="sidenav">
-  <a href="/member/sendmessage">Send Message</a>
-  <a href="/member/readmessages">Read Messages</a>
+  <b><a href="/member" style="color:red">Home</a></b>
+  <a href="/member/messages">Messages</a>
   <a href="/member/downloaddb">Download DB</a>
   <a href="/member/downloadsource">Download Source</a>
   <a href="/member/mysettings">My Settings</a>
+  <a href="/logout">Logout</a>
 </div>
 
+<center><font size="6"><p style="color:white"><b>Cybersecurity CAPSTONE Project</b><p><font></center>
 <div class="login-page">
   <div class="form">
     <form class="login-form" action="/message" method="post">
@@ -987,12 +1516,12 @@ $('.message a').click(function(){
 
 </html>
 
-@@ sendmessage.html.ep
+@@ messages.html.ep
 <!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Cybersecurity Capstone Project - Register</title>
+<title>Cybersecurity Capstone Project - Messages</title>
 <style>
 @import url(https://fonts.googleapis.com/css?family=Roboto:300);
 
@@ -1139,19 +1668,39 @@ $('.message a').click(function(){
 
 <body>
 <div class="sidenav">
-  <b><a href="/member/sendmessage" style="color:red">Send Message</a></b>
-  <a href="/member/readmessages">Read Messages</a>
-  <a href="/member/downloaddb">Download DB</a>
-  <a href="/member/downloadsource">Download Source</a>
+  <a href="/member">Home</a>
+  <b><a href="/member/messages" style="color:red">Messages</a></b>
+  <a href="https://cybersecurity-capstone-project.ulyaoth.net/dbdump">Download DB</a>
+  <a href="https://cybersecurity-capstone-project.ulyaoth.net/source">Download Source</a>
   <a href="/member/mysettings">My Settings</a>
+  <a href="/logout">Logout</a>
 </div>
 
+<center>
+  <br>
+  Arrived messages: <br>
+  <table border="1">
+    <tr>
+      <th>From User</th>
+	  <th>Date</th>
+	  <th>Message</th>
+    </tr>
+    % foreach my $row (@$rows) {
+      <tr>
+        % foreach my $text (@$row) {
+          <td><%= $text %></td>
+        % }
+      </tr>
+    % }
+  </table>
+</center>
+
+<center><font size="4"><p style="color:red"><b><%= stash "myerror" %></b><p><font></center>
 <div class="login-page">
-<center><font size="6"><p style="color:red"><b><%= stash "myerror" %></b><p><font></center>
   <div class="form">
-    <form class="login-form" action="/member/sendmessage" method="post">
+    <form class="login-form" action="/member/messages" method="post">
 	  <input type="text" name="receiverusername" placeholder="Receivers Username"/>
-      <textarea name="membermessage" rows="10" cols="30">Type your message.</textarea>
+      <textarea name="membermessage" rows="10" cols="30"></textarea>
 	  <button>Send Message</button>
     </form>
   </div>
