@@ -33,7 +33,7 @@ my $smtppassword = '';
 my $myerror;
 
 ### Initialize how we want to encrypt, we use AES with a 256bit key, you must specify a key yourself.
-my $key = 'YOUR SECRET KEY HERE';
+my $key = 'YOUR SECRET KEY';
 my $cipher = Crypt::CBC->new(
     -key       => $key,
     -keylength => '256',
@@ -586,9 +586,10 @@ post '/requestpasswordreset' => sub {
   {
   ## Set random string for password reset code.
   my $passwordresetcode = random_string("CCcnCnnCcc");
+  my $EncryptedPasswordResetCode = $cipher->encrypt_hex($passwordresetcode);
   
   ### Insert all encrypted information into "users" table in DB.
-  $db->query('UPDATE users SET PasswordVerification = (?) WHERE Email = (?)', $passwordresetcode, $VerifyInputEmail);
+  $db->query('UPDATE users SET PasswordVerification = (?) WHERE Email = (?)', $EncryptedPasswordResetCode, $VerifyInputEmail);
   
   ### Sent the password reset code to user specified email address with encrypted smtp.
   my $transport = Email::Sender::Transport::SMTP->new({
@@ -624,8 +625,9 @@ post '/resetpassword' => sub {
   
   ### Get all the input variables from the form.  
   my $VerifyInputPasswordresetcode = $c->req->body_params->param('passwordresetcode');
+  my $VerifyInputEmail = $c->req->body_params->param('passwordresetemail');
   my $VerifyInputNewpassword = $c->req->body_params->param('newpassword');
-  my $VerifyInputNewpassword2 = $c->req->body_params->param('newpassword2');  
+  my $VerifyInputNewpassword2 = $c->req->body_params->param('newpassword2'); 
   
   $VerifyInputPasswordresetcode =~ s/\W//g;
   
@@ -633,7 +635,7 @@ post '/resetpassword' => sub {
   my $db = $mysql->db;
 
     ### Check if any field is empty if so error.  
-  if ($VerifyInputPasswordresetcode eq "" || $VerifyInputNewpassword eq "" || $VerifyInputNewpassword2 eq "") 
+  if ($VerifyInputPasswordresetcode eq "" || $VerifyInputNewpassword eq "" || $VerifyInputNewpassword2 eq "" || $VerifyInputEmail eq "") 
   {
     my $myerror = 'Please fill in all fields.';
     $c->stash( 
@@ -661,44 +663,47 @@ post '/resetpassword' => sub {
                                  
 	return $c->render(template => 'resetpassword');
   }
-  
-  ### Verify user input of UserName if it already exists in DB.
-  my $VerifyDBPasswordresetcode = $db->query('SELECT COUNT(1) FROM users WHERE PasswordVerification = (?)', $VerifyInputPasswordresetcode)->text;
-  if ($VerifyDBPasswordresetcode == 1) 
+
+   ### Decrypt Encryption Code from DB and match with InputPassword.
+  my $VerifyRealDBPasswordResetCode = $db->query('SELECT PasswordVerification FROM users WHERE Email = (?)', $VerifyInputEmail)->text; 
+  my $VerifyDBPasswordResetCode = $db->query('SELECT PasswordVerification FROM users WHERE Email = (?)', $VerifyInputEmail)->text;
+  $VerifyDBPasswordResetCode =~ s/\W//g;
+  my $DecryptedDBPasswordResetCode = $cipher->decrypt_hex($VerifyDBPasswordResetCode);
+
+  if ($DecryptedDBPasswordResetCode ne $VerifyInputPasswordresetcode)
   {
-  
-  ## Set random string for password reset code.
-  my $passwordresetcode = random_string("CCcnCnnCcc");
-
-  ### Encrypt users password.
-  my $EncryptedPassword = $cipher->encrypt_hex($VerifyInputNewpassword);
-  
-  ### Insert all encrypted information into "users" table in DB.
-  $db->query('UPDATE users SET Password = (?) WHERE PasswordVerification = (?)', $EncryptedPassword, $VerifyInputPasswordresetcode);
-  $db->query('UPDATE users SET PasswordVerification = (?) WHERE Password = (?)', $passwordresetcode, $EncryptedPassword);
-
-  my $myerror = 'Password reset was successful';
-  $c->stash( 
-            myerror => $myerror, 
-            ); 
-  
-  return $c->render(template => 'login');
-  
-  
-  } else {
-    my $myerror = 'Password Verification Code does not exist.';
+    my $myerror = 'Verification code does not exist';
     $c->stash( 
-                 myerror => $myerror, 
-                ); 
-	return $c->render(template => 'resetpassword');
-  }
+              myerror => $myerror, 
+              ); 
+                                 
+    return $c->render(template => 'resetpassword');
+  } else {
+      ## Set random string for password reset code.
+    my $passwordresetcode = random_string("CCcnCnnCcc");
   
+    ### Encrypt users password.
+    my $EncryptedPassword = $cipher->encrypt_hex($VerifyInputNewpassword);
+    my $EncryptedPasswordResetCode = $cipher->encrypt_hex($passwordresetcode);
+  
+    ### Insert all encrypted information into "users" table in DB.
+    $db->query('UPDATE users SET Password = (?) WHERE PasswordVerification = (?)', $EncryptedPassword, $VerifyRealDBPasswordResetCode);
+    $db->query('UPDATE users SET PasswordVerification = (?) WHERE PasswordVerification = (?)', $EncryptedPasswordResetCode, $VerifyRealDBPasswordResetCode);
+
+    my $myerror = 'Password reset was successful';
+    $c->stash( 
+              myerror => $myerror, 
+              ); 
+  
+    return $c->render(template => 'login');
+  }
+ 
   return $c->render(template => 'resetpassword');
 };
 
   
 ### Set a app secret  
-app->secrets(['YOUR SECRET KEY HERE']);
+app->secrets(['YOUR SECRET KEY']);
 
 ### Mojolicious html templates.
 app->start;
@@ -1373,6 +1378,7 @@ $('.message a').click(function(){
   <div class="form">
     <form class="login-form" action="/resetpassword" method="post">
 	  <input type="text" name="passwordresetcode" placeholder="Your password reset code."/>
+	  <input type="text" name="passwordresetemail" placeholder="Your email."/>
 	  <input type="password" name="newpassword" placeholder="Your new password."/>
 	  <input type="password" name="newpassword2" placeholder="Your new password again."/>
       <button>Reset Password</button>
