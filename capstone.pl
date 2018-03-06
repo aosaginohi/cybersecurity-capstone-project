@@ -33,7 +33,7 @@ my $smtppassword = '';
 my $myerror;
 
 ### Initialize how we want to encrypt, we use AES with a 256bit key, you must specify a key yourself.
-my $key = 'YOUR SECRET KEY!';
+my $key = 'YOUR SECRET KEY HERE';
 my $cipher = Crypt::CBC->new(
     -key       => $key,
     -keylength => '256',
@@ -68,6 +68,106 @@ get '/member' => sub {
   ### Show the member area.
   $c->render('member');
 };
+get '/member/inbox' => sub {
+  ### Initialize c variable.
+  my $c = shift;
+ 
+  ### Initialize DB variable for MySQL access.
+  my $db = $mysql->db;
+ 
+  ### if the user is not authenticated then go to login.
+  $c->redirect_to('login') unless ($c->session('authenticated') == 1);
+ 
+  my $results = $db->query('select from_user, datetime, message from messages where to_user = (?) order by datetime', $c->session('username'));
+  my $rows = $results->arrays;
+  for my $row (@$rows) { $row->[2] = $cipher->decrypt_hex($row->[2]) }  
+  $c->stash( rows => $rows );
+ 
+  ### Show the inbox.
+  $c->render('inbox');
+};
+get '/member/sendmessages' => sub {
+  ### Initialize c variable.
+  my $c = shift;
+ 
+  ### Initialize DB variable for MySQL access.
+  my $db = $mysql->db;
+ 
+  ### if the user is not authenticated then go to login.
+  $c->redirect_to('login') unless ($c->session('authenticated') == 1);
+ 
+  ### Show the member area.
+  $c->render('sendmessages');
+};
+post '/member/sendmessages' => sub {
+  ### Initialize c variable.
+  my $c = shift;
+  
+  ### Initialize DB variable for MySQL access.
+  my $db = $mysql->db;
+    
+  ### Initialize user input from form.
+  my $VerifyInputReceiverUsername = $c->req->body_params->param('receiverusername');
+  my $VerifyInputMembermessage = $c->req->body_params->param('membermessage');
+  
+  ### Make sure user did input all fields.
+  if ($VerifyInputReceiverUsername eq "" || $VerifyInputMembermessage eq "") 
+  {
+    my $myerror = 'Please fill in all fields.';
+    $c->stash( 
+              myerror => $myerror,
+             ); 
+                                 
+    return $c->render(template => 'sendmessages');
+  }
+  
+  ### make sure username are only alphanumeric characters.
+  if ($VerifyInputReceiverUsername !~ /^[a-zA-Z0-9]+$/)
+  {
+    my $myerror = 'You can use only a-z, A-Z, 0-9 characters for the receivers "username"';
+    $c->stash( 
+              myerror => $myerror,
+                ); 
+                                 
+    return $c->render(template => 'sendmessages');
+  }
+
+  ### Do not sent message to yourself.
+  if ($VerifyInputReceiverUsername eq $c->session('username'))
+  {
+    my $myerror = 'Why would you message yourself?';
+    $c->stash( 
+              myerror => $myerror,
+                ); 
+                                 
+    return $c->render(template => 'sendmessages');
+  }
+  
+  ### Check if receivers name exist.
+  my $VerifyDBUsername = $db->query('SELECT COUNT(1) FROM users WHERE UserName = (?)', $VerifyInputReceiverUsername)->text;
+  $VerifyDBUsername =~ s/\W//g;
+  if ($VerifyDBUsername != 1) 
+  {
+    my $myerror = 'Receivers Username does not exist.';
+    $c->stash( 
+              myerror => $myerror,
+                ); 
+                                 
+    return $c->render(template => 'sendmessages');
+  }
+  
+  ### Insert messages into database.
+  my $EncryptedMessage = $cipher->encrypt_hex($VerifyInputMembermessage);
+  my $dt = DateTime->now;
+  $db->query('INSERT INTO messages (to_user, from_user, message, datetime) VALUES (?, ?, ?, ?)', $VerifyInputReceiverUsername, $c->session('username'), $EncryptedMessage, $dt);
+
+  my $myerror = 'Your message has been sent!.';
+  $c->stash( 
+              myerror => $myerror,
+           ); 
+
+  return $c->render(template => 'sendmessages');  
+};
 get '/member/messages' => sub {
   ### Initialize c variable.
   my $c = shift;
@@ -95,6 +195,8 @@ post '/member/messages' => sub {
 
   my $results = $db->query('select from_user, datetime, message from messages where to_user = (?) order by datetime', $c->session('username'));
   my $rows = $results->arrays;
+  for my $row (@$rows) { $row->[2] = $cipher->decrypt_hex($row->[2]) }  
+  $c->stash( rows => $rows );
     
   ### Initialize user input from form.
   my $VerifyInputReceiverUsername = $c->req->body_params->param('receiverusername');
@@ -113,9 +215,9 @@ post '/member/messages' => sub {
   }
   
   ### make sure username are only alphanumeric characters.
-  if ($VerifyInputReceiverUsername !~ /^[a-zA-Z]+$/)
+  if ($VerifyInputReceiverUsername !~ /^[a-zA-Z0-9]+$/)
   {
-    my $myerror = 'You can use only alphanumeric characters for the receivers "username"';
+    my $myerror = 'You can use only a-z, A-Z, 0-9 characters for the receivers "username"';
     $c->stash( 
               myerror => $myerror,
 			  rows => $rows,
@@ -278,9 +380,9 @@ post '/login' => sub {
   }
   
   ### make sure username are only alphanumeric characters.
-  if ($VerifyInputUsername !~ /^[a-zA-Z]+$/)
+  if ($VerifyInputUsername !~ /^[a-zA-Z0-9]+$/)
   {
-    my $myerror = 'You can use only alphanumeric characters for "username"';
+    my $myerror = 'You can use only a-z, A-Z, 0-9 characters for "username"';
     $c->stash( 
                  myerror => $myerror, 
                 ); 
@@ -367,8 +469,8 @@ post '/register' => sub {
   }
 
   ### Make sure first name, lastname and username are only alphanumeric characters.
-  if ($VerifyInputLastname !~ /^[a-zA-Z]+$/ || $VerifyInputFirstname !~ /^[a-zA-Z]+$/ || $VerifyInputUsername !~ /^[a-zA-Z]+$/){
-    my $myerror = 'You can use only alphanumeric characters for "username"';
+  if ($VerifyInputLastname !~ /^[a-zA-Z]+$/ || $VerifyInputFirstname !~ /^[a-zA-Z]+$/ || $VerifyInputUsername !~ /^[a-zA-Z0-9]+$/){
+    my $myerror = 'You can use only a-z A-Z characters for Fristname/Lastname and a-z, A-Z, 0-9 for Username.';
     $c->stash( 
                  myerror => $myerror, 
                 ); 
@@ -385,6 +487,16 @@ post '/register' => sub {
                  myerror => $myerror, 
                 ); 
                                  
+    return $c->render(template => 'register'); 
+  }
+  
+  
+  ### Verify that user uses atleast 8 characters password.
+  if (length($VerifyInputPassword) < 8){
+    my $myerror = 'Password is not atleast 8 characters.';
+    $c->stash( 
+                 myerror => $myerror, 
+                );
     return $c->render(template => 'register'); 
   }
   
@@ -457,10 +569,136 @@ post '/register' => sub {
   ### Move user web page to email verification.
   $c->redirect_to('emailverification');
   };
+get '/requestpasswordreset' => 'requestpasswordreset';
+post '/requestpasswordreset' => sub {
+  ### Initialize c variable.
+  my $c = shift;
+  
+  ### Get all the input variables from the form.  
+  my $VerifyInputEmail = $c->req->body_params->param('passwordresetemail');
+
+  ### Initialize DB variable for MySQL access.
+  my $db = $mysql->db;
+
+  ### Verify user input of UserName if it already exists in DB.
+  my $VerifyDBEmail = $db->query('SELECT COUNT(1) FROM users WHERE Email = (?)', $VerifyInputEmail)->text;
+  if ($VerifyDBEmail == 1) 
+  {
+  ## Set random string for password reset code.
+  my $passwordresetcode = random_string("CCcnCnnCcc");
+  
+  ### Insert all encrypted information into "users" table in DB.
+  $db->query('UPDATE users SET PasswordVerification = (?) WHERE Email = (?)', $passwordresetcode, $VerifyInputEmail);
+  
+  ### Sent the password reset code to user specified email address with encrypted smtp.
+  my $transport = Email::Sender::Transport::SMTP->new({
+    host => $smtpserver,
+    port => $smtpport,
+    ssl => "starttls",
+    sasl_username => $smtpuser,
+    sasl_password => $smtppassword,
+  });
+
+  my $smtpemail = Email::Simple->create(
+    header => [
+      To      => "$VerifyInputEmail",
+      From    => 'hello@ulyaoth.net',
+      Subject => 'Password Reset Code - Cybersecurity Capston Project',
+    ],
+    body => "Please use this code to reset your password, if you did not request this password reset than simply ignore this email: $passwordresetcode\n url: https://cybersecurity-capstone-project.ulyaoth.net/resetpassword",
+  );
+
+  sendmail($smtpemail, { transport => $transport });
+  
+  ### Move user to reset password page.
+  $c->redirect_to('resetpassword');
+  } else {
+  ### Move user to reset password page.
+  $c->redirect_to('resetpassword');
+  };
+};
+get '/resetpassword'  => 'resetpassword';
+post '/resetpassword' => sub {
+  ### Initialize c variable.
+  my $c = shift;
+  
+  ### Get all the input variables from the form.  
+  my $VerifyInputPasswordresetcode = $c->req->body_params->param('passwordresetcode');
+  my $VerifyInputNewpassword = $c->req->body_params->param('newpassword');
+  my $VerifyInputNewpassword2 = $c->req->body_params->param('newpassword2');  
+  
+  $VerifyInputPasswordresetcode =~ s/\W//g;
+  
+  ### Initialize DB variable for MySQL access.
+  my $db = $mysql->db;
+
+    ### Check if any field is empty if so error.  
+  if ($VerifyInputPasswordresetcode eq "" || $VerifyInputNewpassword eq "" || $VerifyInputNewpassword2 eq "") 
+  {
+    my $myerror = 'Please fill in all fields.';
+    $c->stash( 
+                 myerror => $myerror, 
+                ); 
+                                 
+    return $c->render(template => 'resetpassword');
+  }
+  
+  ### Verify that user uses atleast 8 characters password.
+  if (length($VerifyInputNewpassword) < 8){
+    my $myerror = 'Password is not atleast 8 characters.';
+    $c->stash( 
+                 myerror => $myerror, 
+                );
+	return $c->render(template => 'resetpassword');
+  }
+  
+  ### Verify that user typed same password twice.
+  if ($VerifyInputNewpassword ne $VerifyInputNewpassword2 || $VerifyInputNewpassword2 ne $VerifyInputNewpassword){
+    my $myerror = 'new passwords did not match';
+    $c->stash( 
+                 myerror => $myerror, 
+                ); 
+                                 
+	return $c->render(template => 'resetpassword');
+  }
+  
+  ### Verify user input of UserName if it already exists in DB.
+  my $VerifyDBPasswordresetcode = $db->query('SELECT COUNT(1) FROM users WHERE PasswordVerification = (?)', $VerifyInputPasswordresetcode)->text;
+  if ($VerifyDBPasswordresetcode == 1) 
+  {
+  
+  ## Set random string for password reset code.
+  my $passwordresetcode = random_string("CCcnCnnCcc");
+
+  ### Encrypt users password.
+  my $EncryptedPassword = $cipher->encrypt_hex($VerifyInputNewpassword);
+  
+  ### Insert all encrypted information into "users" table in DB.
+  $db->query('UPDATE users SET Password = (?) WHERE PasswordVerification = (?)', $EncryptedPassword, $VerifyInputPasswordresetcode);
+  $db->query('UPDATE users SET PasswordVerification = (?) WHERE Password = (?)', $passwordresetcode, $EncryptedPassword);
+
+  my $myerror = 'Password reset was successful';
+  $c->stash( 
+            myerror => $myerror, 
+            ); 
+  
+  return $c->render(template => 'login');
+  
+  
+  } else {
+    my $myerror = 'Password Verification Code does not exist.';
+    $c->stash( 
+                 myerror => $myerror, 
+                ); 
+	return $c->render(template => 'resetpassword');
+  }
+  
+  return $c->render(template => 'resetpassword');
+};
 
   
 ### Set a app secret  
-app->secrets(['YOUR SECRET KEY!!!']);
+app->secrets(['YOUR SECRET KEY HERE']);
 
 ### Mojolicious html templates.
 app->start;
@@ -591,7 +829,7 @@ $('.message a').click(function(){
       <input type="password" name="password" placeholder="Password"/>
       <button>login</button>
       <p class="message">Not registered? <a href="register">Create an account</a></p>
-	  <p class="message">Reset Password? <a href="resetpassword">Reset Password</a></p>
+	  <p class="message">Reset Password? <a href="requestpasswordreset">Reset Password</a></p>
 	  <p class="message">Verify your email? <a href="emailverification">Verify Email</a></p>
     </form>
   </div>
@@ -720,10 +958,14 @@ $('.message a').click(function(){
 
 <body>
 
-<center><font size="6"><p style="color:white"><b>Cybersecurity CAPSTONE Project - Register</b><p><font></center>
-<center><font size="4"><p style="color:red"><b><%= stash "myerror" %></b><p><font></center>
+<center><font size="6"><p style="color:white"><b>Cybersecurity CAPSTONE Project - Register</b><p></font></center>
+<center><font size="4"><p style="color:red"><b><%= stash "myerror" %></b><p></font></center>
 <div class="login-page">
   <div class="form">
+  	  <p><font size="1">Username: min 3 char, letters a-zA-Z, numbers 0-9</font>
+      <p><font size="1">Password: min 8 char<font>
+	  <p><font size="1">Firstname: max 50 char, letters a-zA-Z</font>
+	  <p><font size="1">Lastname: max 50 char, letters a-zA-Z</font></p>
     <form class="login-form" action="/register" method="post">
 	  <input type="text" name="username" placeholder="Username"/>
       <input type="password" name="password" placeholder="Password"/>
@@ -733,10 +975,9 @@ $('.message a').click(function(){
 	  <input type="text" name="email" placeholder="Email"/>
       <button>register</button>
       <p class="message">Already registered? <a href="login">Sign In</a></p>
-	  <p class="message">Reset Password? <a href="resetpassword">Reset Password</a></p>
+	  <p class="message">Reset Password? <a href="requestpasswordreset">Reset Password</a></p>
 	  <p class="message">Verify your email? <a href="emailverification">Verify Email</a></p>
     </form>
-  </div>
 </div>
 </body>
 
@@ -868,7 +1109,140 @@ $('.message a').click(function(){
       <button>Verify Email</button>
       <p class="message">Already registered? <a href="https://cybersecurity-capstone-project.ulyaoth.net/login">Sign In</a></p>
 	  <p class="message">No yet registered? <a href="https://cybersecurity-capstone-project.ulyaoth.net/register">Register Now</a></p>
-	  <p class="message">Reset password? <a href="https://cybersecurity-capstone-project.ulyaoth.net/resetpassword">Reset Password</a></p>
+	  <p class="message">Reset password? <a href="https://cybersecurity-capstone-project.ulyaoth.net/requestpasswordreset">Reset Password</a></p>
+    </form>
+  </div>
+</div>
+</body>
+
+</html>
+
+@@ requestpasswordreset.html.ep
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Cybersecurity Capstone Project - Request Password Reset</title>
+<style>
+@import url(https://fonts.googleapis.com/css?family=Roboto:300);
+
+.login-page {
+  width: 360px;
+  padding: 8% 0 0;
+  margin: auto;
+}
+.form {
+  position: relative;
+  z-index: 1;
+  background: #FFFFFF;
+  max-width: 360px;
+  margin: 0 auto 100px;
+  padding: 45px;
+  text-align: center;
+  box-shadow: 0 0 20px 0 rgba(0, 0, 0, 0.2), 0 5px 5px 0 rgba(0, 0, 0, 0.24);
+}
+.form input {
+  font-family: "Roboto", sans-serif;
+  outline: 0;
+  background: #f2f2f2;
+  width: 100%;
+  border: 0;
+  margin: 0 0 15px;
+  padding: 15px;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+.form button {
+  font-family: "Roboto", sans-serif;
+  text-transform: uppercase;
+  outline: 0;
+  background: #4CAF50;
+  width: 100%;
+  border: 0;
+  padding: 15px;
+  color: #FFFFFF;
+  font-size: 14px;
+  -webkit-transition: all 0.3 ease;
+  transition: all 0.3 ease;
+  cursor: pointer;
+}
+.form button:hover,.form button:active,.form button:focus {
+  background: #43A047;
+}
+.form .message {
+  margin: 15px 0 0;
+  color: #b3b3b3;
+  font-size: 12px;
+}
+.form .message a {
+  color: #4CAF50;
+  text-decoration: none;
+}
+.form .register-form {
+  display: none;
+}
+.container {
+  position: relative;
+  z-index: 1;
+  max-width: 300px;
+  margin: 0 auto;
+}
+.container:before, .container:after {
+  content: "";
+  display: block;
+  clear: both;
+}
+.container .info {
+  margin: 50px auto;
+  text-align: center;
+}
+.container .info h1 {
+  margin: 0 0 15px;
+  padding: 0;
+  font-size: 36px;
+  font-weight: 300;
+  color: #1a1a1a;
+}
+.container .info span {
+  color: #4d4d4d;
+  font-size: 12px;
+}
+.container .info span a {
+  color: #000000;
+  text-decoration: none;
+}
+.container .info span .fa {
+  color: #EF3B3A;
+}
+body {
+  background: #76b852; /* fallback for old browsers */
+  background: -webkit-linear-gradient(right, #76b852, #8DC26F);
+  background: -moz-linear-gradient(right, #76b852, #8DC26F);
+  background: -o-linear-gradient(right, #76b852, #8DC26F);
+  background: linear-gradient(to left, #76b852, #8DC26F);
+  font-family: "Roboto", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;      
+}
+</style>
+<script>
+$('.message a').click(function(){
+   $('form').animate({height: "toggle", opacity: "toggle"}, "slow");
+});
+</script>
+</head>
+
+<body>
+
+<center><font size="6"><p style="color:white"><b>Cybersecurity CAPSTONE Project - Request Password Reset</b><p><font></center>
+<center><font size="4"><p style="color:red"><b><%= stash "myerror" %></b><p><font></center>
+<div class="login-page">
+  <div class="form">
+    <form class="login-form" action="/requestpasswordreset" method="post">
+	  <input type="text" name="passwordresetemail" placeholder="Your email."/>
+      <button>Request Code</button>
+      <p class="message">Already registered? <a href="login">Sign In</a></p>
+	  <p class="message">No yet registered? <a href="register">Register Now</a></p>
     </form>
   </div>
 </div>
@@ -997,9 +1371,11 @@ $('.message a').click(function(){
 <center><font size="4"><p style="color:red"><b><%= stash "myerror" %></b><p><font></center>
 <div class="login-page">
   <div class="form">
-    <form class="login-form" action="/resetpasswordverify" method="post">
-	  <input type="text" name="passwordresetcode" placeholder="Password reset code."/>
-      <button>Verify Email</button>
+    <form class="login-form" action="/resetpassword" method="post">
+	  <input type="text" name="passwordresetcode" placeholder="Your password reset code."/>
+	  <input type="password" name="newpassword" placeholder="Your new password."/>
+	  <input type="password" name="newpassword2" placeholder="Your new password again."/>
+      <button>Reset Password</button>
       <p class="message">Already registered? <a href="login">Sign In</a></p>
 	  <p class="message">No yet registered? <a href="register">Register Now</a></p>
     </form>
@@ -1008,6 +1384,7 @@ $('.message a').click(function(){
 </body>
 
 </html>
+
 
 @@ not_found.html.ep
 <!DOCTYPE html>
@@ -1496,7 +1873,9 @@ $('.message a').click(function(){
 <body>
 <div class="sidenav">
   <b><a href="/member" style="color:red">Home</a></b>
-  <a href="/member/messages">Messages</a>
+  <a href="/member/inbox">inbox</a>
+  <a href="/member/sendmessages">Send Messages</a>
+  <a href="/member/messages">Messages (beta)</a>
   <a href="/member/downloaddb">Download DB</a>
   <a href="/member/downloadsource">Download Source</a>
   <a href="/member/mysettings">My Settings</a>
@@ -1669,7 +2048,9 @@ $('.message a').click(function(){
 <body>
 <div class="sidenav">
   <a href="/member">Home</a>
-  <b><a href="/member/messages" style="color:red">Messages</a></b>
+  <a href="/member/inbox">inbox</a>
+  <a href="/member/sendmessages">Send Messages</a>
+  <b><a href="/member/messages" style="color:red">Messages (beta)</a></b>
   <a href="https://cybersecurity-capstone-project.ulyaoth.net/dbdump">Download DB</a>
   <a href="https://cybersecurity-capstone-project.ulyaoth.net/source">Download Source</a>
   <a href="/member/mysettings">My Settings</a>
@@ -1699,6 +2080,368 @@ $('.message a').click(function(){
 <div class="login-page">
   <div class="form">
     <form class="login-form" action="/member/messages" method="post">
+	  <input type="text" name="receiverusername" placeholder="Receivers Username"/>
+      <textarea name="membermessage" rows="10" cols="30"></textarea>
+	  <button>Send Message</button>
+    </form>
+  </div>
+</div>
+</body>
+
+</html>
+
+@@ inbox.html.ep
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Cybersecurity Capstone Project - Inbox</title>
+<style>
+@import url(https://fonts.googleapis.com/css?family=Roboto:300);
+
+.login-page {
+  width: 360px;
+  padding: 8% 0 0;
+  margin: auto;
+}
+.form {
+  position: relative;
+  z-index: 1;
+  background: #FFFFFF;
+  max-width: 360px;
+  margin: 0 auto 100px;
+  padding: 45px;
+  text-align: center;
+  box-shadow: 0 0 20px 0 rgba(0, 0, 0, 0.2), 0 5px 5px 0 rgba(0, 0, 0, 0.24);
+}
+.form input {
+  font-family: "Roboto", sans-serif;
+  outline: 0;
+  background: #f2f2f2;
+  width: 100%;
+  border: 0;
+  margin: 0 0 15px;
+  padding: 15px;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+.form button {
+  font-family: "Roboto", sans-serif;
+  text-transform: uppercase;
+  outline: 0;
+  background: #4CAF50;
+  width: 100%;
+  border: 0;
+  padding: 15px;
+  color: #FFFFFF;
+  font-size: 14px;
+  -webkit-transition: all 0.3 ease;
+  transition: all 0.3 ease;
+  cursor: pointer;
+}
+.form button:hover,.form button:active,.form button:focus {
+  background: #43A047;
+}
+.form .message {
+  margin: 15px 0 0;
+  color: #b3b3b3;
+  font-size: 12px;
+}
+.form .message a {
+  color: #4CAF50;
+  text-decoration: none;
+}
+.form .register-form {
+  display: none;
+}
+.container {
+  position: relative;
+  z-index: 1;
+  max-width: 300px;
+  margin: 0 auto;
+}
+.container:before, .container:after {
+  content: "";
+  display: block;
+  clear: both;
+}
+.container .info {
+  margin: 50px auto;
+  text-align: center;
+}
+.container .info h1 {
+  margin: 0 0 15px;
+  padding: 0;
+  font-size: 36px;
+  font-weight: 300;
+  color: #1a1a1a;
+}
+.container .info span {
+  color: #4d4d4d;
+  font-size: 12px;
+}
+.container .info span a {
+  color: #000000;
+  text-decoration: none;
+}
+.container .info span .fa {
+  color: #EF3B3A;
+}
+body {
+  background: #76b852; /* fallback for old browsers */
+  background: -webkit-linear-gradient(right, #76b852, #8DC26F);
+  background: -moz-linear-gradient(right, #76b852, #8DC26F);
+  background: -o-linear-gradient(right, #76b852, #8DC26F);
+  background: linear-gradient(to left, #76b852, #8DC26F);
+  font-family: "Roboto", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;      
+}
+
+.sidenav {
+    width: 250px;
+    position: fixed;
+    z-index: 1;
+    top: 20px;
+    left: 10px;
+    background: #FFFFFF;
+    overflow-x: hidden;
+    padding: 8px 0;
+}
+
+.sidenav a {
+    font-family: "Lato", sans-serif;
+    padding: 6px 8px 6px 16px;
+    text-decoration: none;
+    font-size: 25px;
+    color: #2196F3;
+    display: block;
+}
+
+.sidenav a:hover {
+    color: #064579;
+}
+
+.main {
+    margin-left: 140px; /* Same width as the sidebar + left position in px */
+    font-size: 28px; /* Increased text to enable scrolling */
+    padding: 0px 10px;
+}
+
+@media screen and (max-height: 450px) {
+    .sidenav {padding-top: 15px;}
+    .sidenav a {font-size: 18px;}
+}
+</style>
+<script>
+$('.message a').click(function(){
+   $('form').animate({height: "toggle", opacity: "toggle"}, "slow");
+});
+</script>
+</head>
+
+<body>
+<div class="sidenav">
+  <a href="/member">Home</a>
+  <b><a href="/member/inbox" style="color:red">inbox</a></b>
+  <a href="/member/sendmessages">Send Messages</a>
+  <a href="/member/messages">Messages (beta)</a>
+  <a href="https://cybersecurity-capstone-project.ulyaoth.net/dbdump">Download DB</a>
+  <a href="https://cybersecurity-capstone-project.ulyaoth.net/source">Download Source</a>
+  <a href="/member/mysettings">My Settings</a>
+  <a href="/logout">Logout</a>
+</div>
+
+<center>
+  <br>
+  <font size="6"><p style="color:white"><b>Your Inbox</b><p><font> <br>
+  <table border="1">
+    <tr>
+      <th>From User</th>
+	  <th>Date</th>
+	  <th>Message</th>
+    </tr>
+    % foreach my $row (@$rows) {
+      <tr>
+        % foreach my $text (@$row) {
+          <td><%= $text %></td>
+        % }
+      </tr>
+    % }
+  </table>
+</center>
+</body>
+
+</html>
+
+
+@@ sendmessages.html.ep
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Cybersecurity Capstone Project - Send Messages</title>
+<style>
+@import url(https://fonts.googleapis.com/css?family=Roboto:300);
+
+.login-page {
+  width: 360px;
+  padding: 8% 0 0;
+  margin: auto;
+}
+.form {
+  position: relative;
+  z-index: 1;
+  background: #FFFFFF;
+  max-width: 360px;
+  margin: 0 auto 100px;
+  padding: 45px;
+  text-align: center;
+  box-shadow: 0 0 20px 0 rgba(0, 0, 0, 0.2), 0 5px 5px 0 rgba(0, 0, 0, 0.24);
+}
+.form input {
+  font-family: "Roboto", sans-serif;
+  outline: 0;
+  background: #f2f2f2;
+  width: 100%;
+  border: 0;
+  margin: 0 0 15px;
+  padding: 15px;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+.form button {
+  font-family: "Roboto", sans-serif;
+  text-transform: uppercase;
+  outline: 0;
+  background: #4CAF50;
+  width: 100%;
+  border: 0;
+  padding: 15px;
+  color: #FFFFFF;
+  font-size: 14px;
+  -webkit-transition: all 0.3 ease;
+  transition: all 0.3 ease;
+  cursor: pointer;
+}
+.form button:hover,.form button:active,.form button:focus {
+  background: #43A047;
+}
+.form .message {
+  margin: 15px 0 0;
+  color: #b3b3b3;
+  font-size: 12px;
+}
+.form .message a {
+  color: #4CAF50;
+  text-decoration: none;
+}
+.form .register-form {
+  display: none;
+}
+.container {
+  position: relative;
+  z-index: 1;
+  max-width: 300px;
+  margin: 0 auto;
+}
+.container:before, .container:after {
+  content: "";
+  display: block;
+  clear: both;
+}
+.container .info {
+  margin: 50px auto;
+  text-align: center;
+}
+.container .info h1 {
+  margin: 0 0 15px;
+  padding: 0;
+  font-size: 36px;
+  font-weight: 300;
+  color: #1a1a1a;
+}
+.container .info span {
+  color: #4d4d4d;
+  font-size: 12px;
+}
+.container .info span a {
+  color: #000000;
+  text-decoration: none;
+}
+.container .info span .fa {
+  color: #EF3B3A;
+}
+body {
+  background: #76b852; /* fallback for old browsers */
+  background: -webkit-linear-gradient(right, #76b852, #8DC26F);
+  background: -moz-linear-gradient(right, #76b852, #8DC26F);
+  background: -o-linear-gradient(right, #76b852, #8DC26F);
+  background: linear-gradient(to left, #76b852, #8DC26F);
+  font-family: "Roboto", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;      
+}
+
+.sidenav {
+    width: 250px;
+    position: fixed;
+    z-index: 1;
+    top: 20px;
+    left: 10px;
+    background: #FFFFFF;
+    overflow-x: hidden;
+    padding: 8px 0;
+}
+
+.sidenav a {
+    font-family: "Lato", sans-serif;
+    padding: 6px 8px 6px 16px;
+    text-decoration: none;
+    font-size: 25px;
+    color: #2196F3;
+    display: block;
+}
+
+.sidenav a:hover {
+    color: #064579;
+}
+
+.main {
+    margin-left: 140px; /* Same width as the sidebar + left position in px */
+    font-size: 28px; /* Increased text to enable scrolling */
+    padding: 0px 10px;
+}
+
+@media screen and (max-height: 450px) {
+    .sidenav {padding-top: 15px;}
+    .sidenav a {font-size: 18px;}
+}
+</style>
+<script>
+$('.message a').click(function(){
+   $('form').animate({height: "toggle", opacity: "toggle"}, "slow");
+});
+</script>
+</head>
+
+<body>
+<div class="sidenav">
+  <a href="/member">Home</a>
+  <a href="/member/inbox">inbox</a>
+  <b><a href="/member/sendmessages" style="color:red">Send Messages</a></b>
+  <a href="/member/messages">Messages (beta)</a>
+  <a href="https://cybersecurity-capstone-project.ulyaoth.net/dbdump">Download DB</a>
+  <a href="https://cybersecurity-capstone-project.ulyaoth.net/source">Download Source</a>
+  <a href="/member/mysettings">My Settings</a>
+  <a href="/logout">Logout</a>
+</div>
+
+<center><font size="6"><p style="color:white"><b>Send Messages</b><p><font></center>
+<center><font size="4"><p style="color:red"><b><%= stash "myerror" %></b><p><font></center>
+<div class="login-page">
+  <div class="form">
+    <form class="login-form" action="/member/sendmessages" method="post">
 	  <input type="text" name="receiverusername" placeholder="Receivers Username"/>
       <textarea name="membermessage" rows="10" cols="30"></textarea>
 	  <button>Send Message</button>
