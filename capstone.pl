@@ -33,7 +33,7 @@ my $smtppassword = '';
 my $myerror;
 
 ### Initialize how we want to encrypt, we use AES with a 256bit key, you must specify a key yourself.
-my $key = 'YOUR SECRET KEY';
+my $key = 'YOUR SECRET KEY HERE';
 my $cipher = Crypt::CBC->new(
     -key       => $key,
     -keylength => '256',
@@ -120,6 +120,15 @@ post '/member/sendmessages' => sub {
                                  
     return $c->render(template => 'sendmessages');
   }
+
+  ### Verify that user Username is maximum 16 characters.
+  if (length($VerifyInputReceiverUsername) > 16){
+    my $myerror = 'Username can only be maximum 16 characters.';
+    $c->stash( 
+                 myerror => $myerror, 
+                );
+	return $c->render(template => 'sendmessages');
+  }
   
   ### make sure username are only alphanumeric characters.
   if ($VerifyInputReceiverUsername !~ /^[a-zA-Z0-9]+$/)
@@ -132,17 +141,6 @@ post '/member/sendmessages' => sub {
     return $c->render(template => 'sendmessages');
   }
 
-  ### Do not sent message to yourself.
-  if ($VerifyInputReceiverUsername eq $c->session('username'))
-  {
-    my $myerror = 'Why would you message yourself?';
-    $c->stash( 
-              myerror => $myerror,
-                ); 
-                                 
-    return $c->render(template => 'sendmessages');
-  }
-  
   ### Check if receivers name exist.
   my $VerifyDBUsername = $db->query('SELECT COUNT(1) FROM users WHERE UserName = (?)', $VerifyInputReceiverUsername)->text;
   $VerifyDBUsername =~ s/\W//g;
@@ -213,6 +211,24 @@ post '/member/messages' => sub {
                                  
     return $c->render(template => 'messages');
   }
+
+  ### Verify that user Username is maximum 16 characters.
+  if (length($VerifyInputReceiverUsername) > 16){
+    my $myerror = 'Username can only be maximum 16 characters.';
+    $c->stash( 
+                 myerror => $myerror, 
+                );
+	return $c->render(template => 'register');
+  }
+  
+  ### Verify that user Message is maximum 5000 characters.
+  if (length($VerifyInputMembermessage) > 5000){
+    my $myerror = 'Message can only be maximum 5000 characters.';
+    $c->stash( 
+                 myerror => $myerror, 
+                );
+	return $c->render(template => 'register');
+  }
   
   ### make sure username are only alphanumeric characters.
   if ($VerifyInputReceiverUsername !~ /^[a-zA-Z0-9]+$/)
@@ -226,18 +242,6 @@ post '/member/messages' => sub {
     return $c->render(template => 'messages');
   }
 
-  ### Do not sent message to yourself.
-  if ($VerifyInputReceiverUsername eq $c->session('username'))
-  {
-    my $myerror = 'Why would you message yourself?';
-    $c->stash( 
-              myerror => $myerror,
-			  rows => $rows,
-                ); 
-                                 
-    return $c->render(template => 'messages');
-  }
-  
   ### Check if receivers name exist.
   my $VerifyDBUsername = $db->query('SELECT COUNT(1) FROM users WHERE UserName = (?)', $VerifyInputReceiverUsername)->text;
   $VerifyDBUsername =~ s/\W//g;
@@ -272,16 +276,7 @@ get '/source' => sub {
   ### Download database dump file
   $c->render_file('filepath' => '/srv/capstone/public/source/source.zip');
 };
-get '/member/mysettings' => sub {
-  ### Initialize c variable.
-  my $c = shift;
-  
-  ### if the user is not authenticated then go to login.
-  $c->redirect_to('login') unless ($c->session('authenticated') == 1);
-  
-  ### Show the member area.
-  $c->render('member');
-};
+
 get '/emailverification' => 'emailverification';
 post '/emailverification' => sub {
   ### Initialize c variable.
@@ -292,6 +287,7 @@ post '/emailverification' => sub {
   
   ### Initialize user input from form.
   my $emailverificationcode = $c->req->body_params->param('emailverificationcode');
+  my $emailverification = $c->req->body_params->param('email');
 
   ### Make sure user did input a code.
   if ($emailverificationcode eq "") 
@@ -304,20 +300,44 @@ post '/emailverification' => sub {
     return $c->render(template => 'emailverification');
   }
   
-  ### Verify if code exist in DB if not error, if exist change it to verified.
-  my $VerifyDBEmailverificationcode = $db->query('SELECT COUNT(1) FROM users WHERE EmailVerification = (?)', $emailverificationcode)->text;
-  if ($VerifyDBEmailverificationcode == 1)
+  if ($emailverification eq "") 
   {
-    $db->query('UPDATE users SET EmailVerification = "verified" WHERE EmailVerification = (?)', $emailverificationcode);
-
-    return $c->redirect_to('login/emailverified');
-  } else {
+    my $myerror = 'Please fill in your email.';
+    $c->stash( 
+                 myerror => $myerror, 
+                ); 
+                                 
+    return $c->render(template => 'emailverification');
+  }
+  
+  ### Make sure user did not use verified as code.
+  if ($emailverificationcode eq "verified") 
+  {
+    my $myerror = 'This is not a valid input code.';
+    $c->stash( 
+                 myerror => $myerror, 
+                ); 
+                                 
+    return $c->render(template => 'emailverification');
+  }
+  
+  ### Verify if code exist in DB if not error, if exist change it to verified.
+  my $VerifyDBEmailverificationcode = $db->query('SELECT EmailVerification FROM users WHERE Email = (?)', $emailverification)->text;
+  $VerifyDBEmailverificationcode =~ s/\W//g;
+  my $DecryptedDBEmailVerificationCode = $cipher->decrypt_hex($VerifyDBEmailverificationcode);
+  
+  if ($DecryptedDBEmailVerificationCode ne $emailverificationcode)
+  {
     my $myerror = 'This code is not valid please check your email.';
     $c->stash(
                  myerror => $myerror,
                 );
 
     return $c->render(template => 'emailverification');
+  } else { 
+    $db->query('UPDATE users SET EmailVerification = "verified" WHERE Email = (?)', $emailverification);
+
+    return $c->redirect_to('login/emailverified');  
   }
 };
 get '/logout' => sub {
@@ -368,6 +388,8 @@ post '/login' => sub {
   my $VerifyInputUsername = $c->req->body_params->param('username');
   my $VerifyInputPassword = $c->req->body_params->param('password');
 
+  $VerifyInputUsername =~ s/\W//g;
+  
   ### If user input is empty then error.
   if ($VerifyInputUsername eq "" || $VerifyInputPassword eq "") 
   {
@@ -377,6 +399,24 @@ post '/login' => sub {
                 ); 
                                  
     return $c->render(template => 'login');
+  }
+
+  ### Verify that user Password is maximum 64 characters.
+  if (length($VerifyInputPassword) > 64){
+    my $myerror = 'Password can only be maximum 64 characters.';
+    $c->stash( 
+                 myerror => $myerror, 
+                );
+	return $c->render(template => 'login');
+  }
+  
+  ### Verify that user Username is maximum 16 characters.
+  if (length($VerifyInputUsername) > 16){
+    my $myerror = 'Username can only be maximum 16 characters.';
+    $c->stash( 
+                 myerror => $myerror, 
+                );
+	return $c->render(template => 'login');
   }
   
   ### make sure username are only alphanumeric characters.
@@ -392,17 +432,17 @@ post '/login' => sub {
   
   ### Verify if UserName exists in DB.
   my $DBUsernameMatch;
-  my $VerifyDBUsername = $db->query('SELECT COUNT(1) FROM users WHERE UserName = (?)', $VerifyInputUsername);
+  my $VerifyDBUsername = $db->query('SELECT COUNT(1) FROM users WHERE UserName = (?)', $VerifyInputUsername)->text;
   if ($VerifyDBUsername == 1) 
   {
-    my $myerror = 'UserName or Password is invalid.';
+    $DBUsernameMatch = "yes";
+  } else {
+    my $myerror = 'Username does not exist.';
     $c->stash( 
                  myerror => $myerror, 
                 ); 
                                  
     return $c->render(template => 'login');
-  } else {
-    $DBUsernameMatch = "yes";
   }
   
   ### Decrypt password from DB and match with InputPassword.
@@ -412,7 +452,7 @@ post '/login' => sub {
 
   if ($DecryptedDBPassword ne $VerifyInputPassword)
   {
-    my $myerror = 'UserName or Password is invalid.';
+    my $myerror = 'Your password is invalid.';
     $c->stash( 
                  myerror => $myerror, 
                 ); 
@@ -436,7 +476,7 @@ post '/login' => sub {
 	$c->session( 'authenticated' => 1 );
 	$c->redirect_to('member');
   } else {
-    my $myerror = 'UserName or Password is invalid.';
+    my $myerror = 'Username or Password is invalid.';
     $c->stash( 
                  myerror => $myerror, 
                 ); 
@@ -450,15 +490,15 @@ post '/register' => sub {
   my $c = shift;
   
   ### Get all the input variables from the form.  
-  my $VerifyInputLastname = $c->req->body_params->param('lastname');
-  my $VerifyInputFirstname = $c->req->body_params->param('firstname');
   my $VerifyInputEmail = $c->req->body_params->param('email');
   my $VerifyInputUsername = $c->req->body_params->param('username');
   my $VerifyInputPassword = $c->req->body_params->param('password');
   my $VerifyInputPasswordverify = $c->req->body_params->param('passwordverify');
+
+  $VerifyInputUsername =~ s/\W//g;
   
   ### Check if any field is empty if so error.  
-  if ($VerifyInputLastname eq "" || $VerifyInputFirstname eq "" || $VerifyInputEmail eq "" || $VerifyInputUsername eq "" || $VerifyInputPassword eq "" || $VerifyInputPasswordverify eq "") 
+  if ($VerifyInputEmail eq "" || $VerifyInputUsername eq "" || $VerifyInputPassword eq "" || $VerifyInputPasswordverify eq "") 
   {
     my $myerror = 'Please fill in all fields.';
     $c->stash( 
@@ -468,14 +508,41 @@ post '/register' => sub {
     return $c->render(template => 'register');
   }
 
-  ### Make sure first name, lastname and username are only alphanumeric characters.
-  if ($VerifyInputLastname !~ /^[a-zA-Z]+$/ || $VerifyInputFirstname !~ /^[a-zA-Z]+$/ || $VerifyInputUsername !~ /^[a-zA-Z0-9]+$/){
-    my $myerror = 'You can use only a-z A-Z characters for Fristname/Lastname and a-z, A-Z, 0-9 for Username.';
+  ### Make sure username is only alphanumeric
+  if ($VerifyInputUsername !~ /^[a-zA-Z0-9]+$/){
+    my $myerror = 'You can use only a-z, A-Z, 0-9 for Username.';
     $c->stash( 
                  myerror => $myerror, 
                 ); 
                                  
     return $c->render(template => 'register');
+  }
+ 
+  ### Verify that user Email is maximum 50 characters.
+  if (length($VerifyInputEmail) > 50){
+    my $myerror = 'Password can only be maximum 50 characters.';
+    $c->stash( 
+                 myerror => $myerror, 
+                );
+	return $c->render(template => 'register');
+  }
+ 
+  ### Verify that user Password is maximum 64 characters.
+  if (length($VerifyInputPassword) > 64){
+    my $myerror = 'Password can only be maximum 64 characters.';
+    $c->stash( 
+                 myerror => $myerror, 
+                );
+	return $c->render(template => 'register');
+  }
+  
+  ### Verify that user Username is maximum 16 characters.
+  if (length($VerifyInputUsername) > 16){
+    my $myerror = 'Username can only be maximum 16 characters.';
+    $c->stash( 
+                 myerror => $myerror, 
+                );
+	return $c->render(template => 'register');
   }
   
   ### Check the the inputed email is really a email.
@@ -517,7 +584,7 @@ post '/register' => sub {
   my $VerifyDBUsername = $db->query('SELECT COUNT(1) FROM users WHERE Username = (?)', $VerifyInputUsername)->text;
   if ($VerifyDBUsername == 1) 
   {
-    my $myerror = 'UserName is invalid or already in use please choose another one.';
+    my $myerror = 'Username is invalid or already in use please choose another one.';
     $c->stash( 
                  myerror => $myerror, 
                 ); 
@@ -542,9 +609,10 @@ post '/register' => sub {
   
   ## Set random string for email verification.
   my $emailverification = random_string("CCcnCnnCcc");
+  my $EncryptedEmailVerificationCode = $cipher->encrypt_hex($emailverification);
   
   ### Insert all encrypted information into "users" table in DB.
-  $db->query('INSERT INTO users (LastName, FirstName, Email, UserName, Password, EmailVerification, MFAEnabled) VALUES (?, ?, ?, ?, ?, ?, ?)', $VerifyInputLastname, $VerifyInputFirstname, $VerifyInputEmail, $VerifyInputUsername, $EncryptedPassword, $emailverification, 'no');
+  $db->query('INSERT INTO users (Email, UserName, Password, EmailVerification, MFAEnabled) VALUES (?, ?, ?, ?, ?)', $VerifyInputEmail, $VerifyInputUsername, $EncryptedPassword, $EncryptedEmailVerificationCode, 'no');
   
   ### Sent the Email Verification code to user specified email address with encrypted smtp.
   my $transport = Email::Sender::Transport::SMTP->new({
@@ -577,6 +645,27 @@ post '/requestpasswordreset' => sub {
   ### Get all the input variables from the form.  
   my $VerifyInputEmail = $c->req->body_params->param('passwordresetemail');
 
+ ### Verify that user Email is maximum 50 characters.
+  if (length($VerifyInputEmail) > 50){
+    my $myerror = 'Password can only be maximum 50 characters.';
+    $c->stash( 
+                 myerror => $myerror, 
+                );
+	return $c->render(template => 'requestpasswordreset');
+  }
+  
+  ### Check the the inputed email is really a email.
+  if (Email::Valid->address($VerifyInputEmail)) {
+  # meh no idea how to only check wrong.
+  } else {
+    my $myerror = 'You did not input a valid email';
+    $c->stash( 
+                 myerror => $myerror, 
+                ); 
+                                 
+    return $c->render(template => 'requestpasswordreset'); 
+  }
+  
   ### Initialize DB variable for MySQL access.
   my $db = $mysql->db;
 
@@ -623,6 +712,9 @@ post '/resetpassword' => sub {
   ### Initialize c variable.
   my $c = shift;
   
+  ### Initialize DB variable for MySQL access.
+  my $db = $mysql->db;
+  
   ### Get all the input variables from the form.  
   my $VerifyInputPasswordresetcode = $c->req->body_params->param('passwordresetcode');
   my $VerifyInputEmail = $c->req->body_params->param('passwordresetemail');
@@ -630,11 +722,32 @@ post '/resetpassword' => sub {
   my $VerifyInputNewpassword2 = $c->req->body_params->param('newpassword2'); 
   
   $VerifyInputPasswordresetcode =~ s/\W//g;
+ 
+  ### Check the the inputed email is really a email.
+  if (Email::Valid->address($VerifyInputEmail)) {
+  # meh no idea how to only check wrong.
+  } else {
+    my $myerror = 'You did not input a valid email';
+    $c->stash( 
+                 myerror => $myerror, 
+                ); 
+                                 
+    return $c->render(template => 'resetpassword'); 
+  }
   
-  ### Initialize DB variable for MySQL access.
-  my $db = $mysql->db;
+  ### Verify user input of Email if it already exists in DB.
+  my $VerifyDBEmail = $db->query('SELECT COUNT(1) FROM users WHERE Email = (?)', $VerifyInputEmail)->text;
+  if ($VerifyDBEmail != 1) 
+  {
+    my $myerror = 'Email not valid.';
+    $c->stash( 
+                 myerror => $myerror, 
+                ); 
+                                 
+    return $c->render(template => 'resetpassword');
+  }
 
-    ### Check if any field is empty if so error.  
+  ### Check if any field is empty if so error.  
   if ($VerifyInputPasswordresetcode eq "" || $VerifyInputNewpassword eq "" || $VerifyInputNewpassword2 eq "" || $VerifyInputEmail eq "") 
   {
     my $myerror = 'Please fill in all fields.';
@@ -645,6 +758,24 @@ post '/resetpassword' => sub {
     return $c->render(template => 'resetpassword');
   }
   
+ ### Verify that user Email is maximum 50 characters.
+  if (length($VerifyInputEmail) > 50){
+    my $myerror = 'Password can only be maximum 50 characters.';
+    $c->stash( 
+                 myerror => $myerror, 
+                );
+	return $c->render(template => 'resetpassword');
+  }
+
+  ### Verify that user Password is maximum 64 characters.
+  if (length($VerifyInputNewpassword) > 64){
+    my $myerror = 'Password can only be maximum 64 characters.';
+    $c->stash( 
+                 myerror => $myerror, 
+                );
+	return $c->render(template => 'resetpassword');
+  }  
+ 
   ### Verify that user uses atleast 8 characters password.
   if (length($VerifyInputNewpassword) < 8){
     my $myerror = 'Password is not atleast 8 characters.';
@@ -665,7 +796,6 @@ post '/resetpassword' => sub {
   }
 
    ### Decrypt Encryption Code from DB and match with InputPassword.
-  my $VerifyRealDBPasswordResetCode = $db->query('SELECT PasswordVerification FROM users WHERE Email = (?)', $VerifyInputEmail)->text; 
   my $VerifyDBPasswordResetCode = $db->query('SELECT PasswordVerification FROM users WHERE Email = (?)', $VerifyInputEmail)->text;
   $VerifyDBPasswordResetCode =~ s/\W//g;
   my $DecryptedDBPasswordResetCode = $cipher->decrypt_hex($VerifyDBPasswordResetCode);
@@ -687,8 +817,8 @@ post '/resetpassword' => sub {
     my $EncryptedPasswordResetCode = $cipher->encrypt_hex($passwordresetcode);
   
     ### Insert all encrypted information into "users" table in DB.
-    $db->query('UPDATE users SET Password = (?) WHERE PasswordVerification = (?)', $EncryptedPassword, $VerifyRealDBPasswordResetCode);
-    $db->query('UPDATE users SET PasswordVerification = (?) WHERE PasswordVerification = (?)', $EncryptedPasswordResetCode, $VerifyRealDBPasswordResetCode);
+    $db->query('UPDATE users SET Password = (?) WHERE Email = (?)', $EncryptedPassword, $VerifyInputEmail);
+    $db->query('UPDATE users SET PasswordVerification = (?) WHERE Email = (?)', $EncryptedPasswordResetCode, $VerifyInputEmail);
 
     my $myerror = 'Password reset was successful';
     $c->stash( 
@@ -703,7 +833,7 @@ post '/resetpassword' => sub {
 
   
 ### Set a app secret  
-app->secrets(['YOUR SECRET KEY']);
+app->secrets(['YOUR KEY HERE']);
 
 ### Mojolicious html templates.
 app->start;
@@ -967,16 +1097,12 @@ $('.message a').click(function(){
 <center><font size="4"><p style="color:red"><b><%= stash "myerror" %></b><p></font></center>
 <div class="login-page">
   <div class="form">
-  	  <p><font size="1">Username: min 3 char, letters a-zA-Z, numbers 0-9</font>
-      <p><font size="1">Password: min 8 char<font>
-	  <p><font size="1">Firstname: max 50 char, letters a-zA-Z</font>
-	  <p><font size="1">Lastname: max 50 char, letters a-zA-Z</font></p>
+  	  <p><font size="1">Username: min 3 char, max 16 char, letters a-zA-Z, numbers 0-9</font>
+      <p><font size="1">Password: min 8 char<font></p>
     <form class="login-form" action="/register" method="post">
 	  <input type="text" name="username" placeholder="Username"/>
       <input type="password" name="password" placeholder="Password"/>
 	  <input type="password" name="passwordverify" placeholder="Type your password again"/>
-      <input type="text" name="firstname" placeholder="First Name"/>
-	  <input type="text" name="lastname" placeholder="Last Name"/>
 	  <input type="text" name="email" placeholder="Email"/>
       <button>register</button>
       <p class="message">Already registered? <a href="login">Sign In</a></p>
@@ -1111,6 +1237,7 @@ $('.message a').click(function(){
   <div class="form">
     <form class="login-form" action="/emailverification" method="post">
 	  <input type="text" name="emailverificationcode" placeholder="Email verification code."/>
+	  <input type="text" name="email" placeholder="Email address"/>
       <button>Verify Email</button>
       <p class="message">Already registered? <a href="https://cybersecurity-capstone-project.ulyaoth.net/login">Sign In</a></p>
 	  <p class="message">No yet registered? <a href="https://cybersecurity-capstone-project.ulyaoth.net/register">Register Now</a></p>
@@ -1884,7 +2011,6 @@ $('.message a').click(function(){
   <a href="/member/messages">Messages (beta)</a>
   <a href="/member/downloaddb">Download DB</a>
   <a href="/member/downloadsource">Download Source</a>
-  <a href="/member/mysettings">My Settings</a>
   <a href="/logout">Logout</a>
 </div>
 
@@ -2059,7 +2185,6 @@ $('.message a').click(function(){
   <b><a href="/member/messages" style="color:red">Messages (beta)</a></b>
   <a href="https://cybersecurity-capstone-project.ulyaoth.net/dbdump">Download DB</a>
   <a href="https://cybersecurity-capstone-project.ulyaoth.net/source">Download Source</a>
-  <a href="/member/mysettings">My Settings</a>
   <a href="/logout">Logout</a>
 </div>
 
@@ -2254,7 +2379,6 @@ $('.message a').click(function(){
   <a href="/member/messages">Messages (beta)</a>
   <a href="https://cybersecurity-capstone-project.ulyaoth.net/dbdump">Download DB</a>
   <a href="https://cybersecurity-capstone-project.ulyaoth.net/source">Download Source</a>
-  <a href="/member/mysettings">My Settings</a>
   <a href="/logout">Logout</a>
 </div>
 
@@ -2439,7 +2563,6 @@ $('.message a').click(function(){
   <a href="/member/messages">Messages (beta)</a>
   <a href="https://cybersecurity-capstone-project.ulyaoth.net/dbdump">Download DB</a>
   <a href="https://cybersecurity-capstone-project.ulyaoth.net/source">Download Source</a>
-  <a href="/member/mysettings">My Settings</a>
   <a href="/logout">Logout</a>
 </div>
 
